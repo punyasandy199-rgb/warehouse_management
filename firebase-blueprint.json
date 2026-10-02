@@ -1,0 +1,106 @@
+{
+  "entities": {
+    "Rack": {
+      "title": "Rack",
+      "description": "Warehouse rack layout, bays, and slot inventory storage",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique rack identifier" },
+        "name": { "type": "string", "description": "Rack display name" },
+        "zone": { "type": "string", "description": "Warehouse zone code" },
+        "levels": { "type": "number", "description": "Number of vertical levels" },
+        "bays": { "type": "number", "description": "Number of horizontal bays" },
+        "slots": { "type": "object", "description": "Slot map containing pallet items" },
+        "maxCapacityKg": { "type": "number", "description": "Maximum weight capacity in kg" },
+        "currentWeightKg": { "type": "number", "description": "Current weight loaded in kg" },
+        "totalSlots": { "type": "number", "description": "Total slot capacity" },
+        "occupiedSlots": { "type": "number", "description": "Occupied slots count" },
+        "availableSlots": { "type": "number", "description": "Available slots count" },
+        "lastUpdated": { "type": "string", "description": "Timestamp of last modification" }
+      },
+      "required": ["id", "name", "zone", "levels", "bays", "slots"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Finished goods product master item with pallet and barcode specs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Product ID" },
+        "itemCode": { "type": "string", "description": "Unique SKU / Item code" },
+        "itemName": { "type": "string", "description": "Product name" },
+        "unit": { "type": "string", "description": "Stocking unit" },
+        "category": { "type": "string", "description": "Product category" },
+        "boxPerPallet": { "type": "number", "description": "Conversion boxes per pallet" },
+        "barcode": { "type": "string", "description": "Full barcode data" },
+        "minStockBox": { "type": "number", "description": "Minimum threshold safety stock" },
+        "currentStockBox": { "type": "number", "description": "Realtime stock quantity in boxes" },
+        "weightPerBoxKg": { "type": "number", "description": "Net weight in kg per box" }
+      },
+      "required": ["id", "itemCode", "itemName", "boxPerPallet", "barcode"]
+    },
+    "User": {
+      "title": "User",
+      "description": "Warehouse personnel user account and credentials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "User identifier" },
+        "name": { "type": "string", "description": "Full name of staff" },
+        "username": { "type": "string", "description": "Login username" },
+        "role": { "type": "string", "description": "Role: superadmin, admin, operator" },
+        "pin": { "type": "string", "description": "Access PIN or password" },
+        "status": { "type": "string", "description": "Account status" }
+      },
+      "required": ["id", "name", "username", "role", "pin"]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "PIC and warehouse operational employee profile",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Employee ID" },
+        "name": { "type": "string", "description": "Employee Name" },
+        "nik": { "type": "string", "description": "National / Staff ID" },
+        "role": { "type": "string", "description": "Operational assignment" },
+        "shift": { "type": "string", "description": "Assigned shift" }
+      },
+      "required": ["id", "name", "nik", "role"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit trail log of putaway, picking, and stock transactions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Log ID" },
+        "timestamp": { "type": "string", "description": "ISO timestamp" },
+        "userId": { "type": "string", "description": "Executing user ID" },
+        "userName": { "type": "string", "description": "Executing user name" },
+        "userRole": { "type": "string", "description": "Executing user role" },
+        "action": { "type": "string", "description": "Action type" },
+        "description": { "type": "string", "description": "Activity details" }
+      },
+      "required": ["id", "timestamp", "userName", "action", "description"]
+    }
+  },
+  "firestore": {
+    "/racks/{rackId}": {
+      "schema": "Rack",
+      "description": "Warehouse rack documents"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Product catalog master documents"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User accounts and permissions"
+    },
+    "/employees/{employeeId}": {
+      "schema": "Employee",
+      "description": "Operational employee PICs"
+    },
+    "/logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Audit trail logs for warehouse activities"
+    }
+  }
+}

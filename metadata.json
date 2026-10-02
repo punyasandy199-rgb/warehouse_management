@@ -1,0 +1,6 @@
+{
+  "name": "SIKUTANG - Sistem Keakuratan Monitoring Barang Jadi",
+  "description": "WMS FGW (Finished Goods Warehouse) monitoring rak gudang barang jadi dengan barcode scanner real-time, master produk BOX, master rak A-I bertingkat, pelacakan slot otomatis, dan koneksi printer Intermec.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
