@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   MapPin, 
   Eye, 
@@ -106,6 +106,20 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
   const [addErrorMsg, setAddErrorMsg] = useState<string | null>(null);
   const [editErrorMsg, setEditErrorMsg] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // State: Konfirmasi Hapus Area (In-App Modal agar tidak terblokir sandbox iframe)
+  const [areaToDelete, setAreaToDelete] = useState<StagingAreaInfo | null>(null);
+
+  // Otomatis bersihkan jika ada sisa Lorong KL di dalam data
+  useEffect(() => {
+    const hasKL = stagingAreas.some(a => a && (a.id === 'Lorong KL' || a.name?.toLowerCase().trim() === 'lorong kl'));
+    if (hasKL) {
+      const cleaned = stagingAreas.filter(a => a && a.id !== 'Lorong KL' && a.name?.toLowerCase().trim() !== 'lorong kl');
+      onUpdateStagingAreas(cleaned);
+      saveStoredStagingAreas(cleaned);
+      saveSystemConfigToCloud({ stagingAreas: cleaned });
+    }
+  }, [stagingAreas, onUpdateStagingAreas]);
 
   // Akses edit & tambah lokasi untuk seluruh pengguna sistem gudang
   const canEdit = true;
@@ -244,17 +258,24 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
     }
   };
 
-  // Delete Area
-  const handleDeleteArea = async (area: StagingAreaInfo) => {
-    if (!window.confirm(`Hapus area staging "${area.name}" dari sistem gudang?`)) {
-      return;
-    }
+  // Delete Area Handlers
+  const handleDeleteArea = (area: StagingAreaInfo) => {
+    setAreaToDelete(area);
+  };
 
-    const updated = stagingAreas.filter(item => item.id !== area.id);
+  const handleConfirmDelete = async () => {
+    if (!areaToDelete) return;
+    const target = areaToDelete;
+    const updated = stagingAreas.filter(item => 
+      item.id !== target.id && 
+      item.name.toLowerCase().trim() !== target.name.toLowerCase().trim()
+    );
     onUpdateStagingAreas(updated);
     saveStoredStagingAreas(updated);
     await saveSystemConfigToCloud({ stagingAreas: updated });
-    setSuccessNotice(`Area "${area.name}" berhasil dihapus.`);
+    setSuccessNotice(`Area "${target.name}" berhasil dihapus.`);
+    setAreaToDelete(null);
+    setEditingArea(null);
     setTimeout(() => setSuccessNotice(null), 4000);
   };
 
@@ -698,6 +719,59 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
       )}
 
       {/* ===================================================================== */}
+      {/* MODAL KONFIRMASI HAPUS AREA                                           */}
+      {/* ===================================================================== */}
+      {areaToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-200 p-6 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900">
+                  Hapus Area Staging?
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Tindakan ini akan menghapus area secara permanen.
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-rose-50/70 border border-rose-200 rounded-2xl p-3.5 space-y-1 text-xs">
+              <div className="font-bold text-slate-800">
+                Nama Area: <span className="font-mono text-rose-700">{areaToDelete.name}</span>
+              </div>
+              <div className="text-slate-600">
+                Tipe: <span className="font-semibold">{areaToDelete.type}</span> &bull; Kapasitas: <span className="font-semibold">{areaToDelete.capacityPallets} Pallet</span>
+              </div>
+              <p className="text-[11px] text-rose-600 font-medium pt-1">
+                Data akan dihapus dari sistem gudang lokal dan Cloud Firestore.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setAreaToDelete(null)}
+                className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition cursor-pointer"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-black transition cursor-pointer shadow-md flex items-center gap-2"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus Sekarang</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
       {/* MODAL 2: UBAH NAMA LORONG, FOTO & DATA AREA                           */}
       {/* ===================================================================== */}
       {editingArea && (
@@ -969,7 +1043,7 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                   required
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Contoh: Lorong KL, Loading 4, Area Transit QC, dll."
+                  placeholder="Contoh: Lorong MN, Loading 4, Area Transit QC, dll."
                   className="w-full h-11 px-3.5 border-2 border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-rose-500 bg-white"
                 />
 
@@ -977,7 +1051,6 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                 <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] text-slate-400 font-bold">Saran Cepat:</span>
                   {[
-                    { name: 'Lorong KL', type: 'LORONG' as const, cap: 12 },
                     { name: 'Lorong MN', type: 'LORONG' as const, cap: 12 },
                     { name: 'Lorong OP', type: 'LORONG' as const, cap: 14 },
                     { name: 'Loading 4', type: 'LOADING' as const, cap: 16 },

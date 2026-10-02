@@ -2804,7 +2804,7 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                   autoFocus
                   value={newStagingName}
                   onChange={(e) => setNewStagingName(e.target.value)}
-                  placeholder="Contoh: Lorong KL, Loading 4, dll."
+                  placeholder="Contoh: Lorong MN, Loading 4, dll."
                   className="w-full h-11 px-3.5 border-2 border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-rose-500 bg-white"
                 />
 
@@ -2812,8 +2812,8 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                 <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                   <span className="text-[10px] text-slate-400 font-bold">Saran:</span>
                   {[
-                    { name: 'Lorong KL', type: 'LORONG' as const, cap: 12 },
                     { name: 'Lorong MN', type: 'LORONG' as const, cap: 12 },
+                    { name: 'Lorong OP', type: 'LORONG' as const, cap: 14 },
                     { name: 'Loading 4', type: 'LOADING' as const, cap: 16 },
                     { name: 'Loading 5', type: 'LOADING' as const, cap: 18 },
                     { name: 'Buffer Transit QC', type: 'BUFFER' as const, cap: 10 }

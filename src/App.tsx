@@ -614,11 +614,11 @@ export default function App() {
             setLogs(cloudData.logs);
           }
           if (cloudData.config?.stagingAreas && Array.isArray(cloudData.config.stagingAreas)) {
+            const hadKL = cloudData.config.stagingAreas.some((a: any) => a && (a.id === 'Lorong KL' || a.name?.toLowerCase().trim() === 'lorong kl'));
             setStagingAreas(prev => {
               const merged = mergeStagingAreas(cloudData.config.stagingAreas, prev);
               saveStoredStagingAreas(merged);
-              // If local has extra custom areas not yet in cloud, sync to cloud
-              if (merged.length > cloudData.config.stagingAreas.length) {
+              if (hadKL || merged.length > cloudData.config.stagingAreas.length) {
                 saveSystemConfigToCloud({ stagingAreas: merged });
               }
               return merged;

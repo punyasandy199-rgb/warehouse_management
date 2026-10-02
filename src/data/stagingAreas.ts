@@ -49,15 +49,6 @@ export const DEFAULT_STAGING_AREAS: StagingAreaInfo[] = [
     updatedAt: '2026-09-24 08:00'
   },
   {
-    id: 'Lorong KL',
-    name: 'Lorong KL',
-    type: 'LORONG',
-    description: 'Area staging lorong Rak K dan Rak L, buffer transit tambahan proses muat barang jadi.',
-    photoUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80',
-    capacityPallets: 12,
-    updatedAt: '2026-09-24 08:00'
-  },
-  {
     id: 'Loading 1',
     name: 'Loading 1',
     type: 'LOADING',
@@ -92,7 +83,8 @@ export function getStoredStagingAreas(): StagingAreaInfo[] {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Clean out Lorong KL or nulls
+        return parsed.filter(a => a && a.id !== 'Lorong KL' && a.name?.toLowerCase().trim() !== 'lorong kl');
       }
     }
   } catch (err) {
@@ -103,53 +95,39 @@ export function getStoredStagingAreas(): StagingAreaInfo[] {
 
 export function saveStoredStagingAreas(areas: StagingAreaInfo[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY_STAGING_AREAS, JSON.stringify(areas));
+    const cleaned = areas.filter(a => a && a.id !== 'Lorong KL' && a.name?.toLowerCase().trim() !== 'lorong kl');
+    localStorage.setItem(STORAGE_KEY_STAGING_AREAS, JSON.stringify(cleaned));
   } catch (err) {
     console.warn('Failed to save staging areas to storage', err);
   }
 }
 
 /**
- * Merges cloud staging areas with local staging areas to prevent custom
- * areas from being wiped out by initial or delayed snapshots.
+ * Merges cloud staging areas with local staging areas.
+ * Authoritative cloud list takes precedence so deletions are respected.
  */
 export function mergeStagingAreas(
   cloudAreas?: StagingAreaInfo[] | null,
   localAreas?: StagingAreaInfo[] | null
 ): StagingAreaInfo[] {
   const defaults = DEFAULT_STAGING_AREAS;
-  const cloudList = Array.isArray(cloudAreas) && cloudAreas.length > 0 ? cloudAreas : [];
-  const localList = Array.isArray(localAreas) && localAreas.length > 0 ? localAreas : [];
+  const isLorongKL = (a: StagingAreaInfo) => !a || a.id === 'Lorong KL' || a.name?.toLowerCase().trim() === 'lorong kl';
 
-  if (cloudList.length === 0 && localList.length === 0) {
-    return defaults;
+  const cloudList = Array.isArray(cloudAreas) && cloudAreas.length > 0
+    ? cloudAreas.filter(a => !isLorongKL(a))
+    : null;
+  const localList = Array.isArray(localAreas) && localAreas.length > 0
+    ? localAreas.filter(a => !isLorongKL(a))
+    : null;
+
+  if (cloudList && cloudList.length > 0) {
+    return cloudList;
   }
 
-  const map = new Map<string, StagingAreaInfo>();
+  if (localList && localList.length > 0) {
+    return localList;
+  }
 
-  // 1. Populate defaults
-  defaults.forEach(a => {
-    map.set(a.id.toLowerCase().trim(), a);
-  });
-
-  // 2. Overlay cloud areas
-  cloudList.forEach(a => {
-    if (a && (a.name || a.id)) {
-      const key = (a.id || a.name).toLowerCase().trim();
-      map.set(key, a);
-    }
-  });
-
-  // 3. Keep local custom areas that haven't synced yet
-  localList.forEach(a => {
-    if (a && (a.name || a.id)) {
-      const key = (a.id || a.name).toLowerCase().trim();
-      if (!map.has(key)) {
-        map.set(key, a);
-      }
-    }
-  });
-
-  return Array.from(map.values());
+  return defaults;
 }
 
