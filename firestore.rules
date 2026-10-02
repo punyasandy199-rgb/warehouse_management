@@ -28,6 +28,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // System data (staging areas, system config, outbound plans, etc.)
+    match /system_data/{document=**} {
+      allow read, write: if true;
+    }
+
     // Default catch-all for system configuration or test connections
     match /{document=**} {
       allow read, write: if true;

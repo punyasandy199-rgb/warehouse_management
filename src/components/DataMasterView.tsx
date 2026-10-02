@@ -57,9 +57,15 @@ export const DataMasterView: React.FC<DataMasterViewProps> = ({
   initialTab = 'rak'
 }) => {
   const [activeMasterTab, setActiveMasterTab] = useState<'rak' | 'produk' | 'karyawan' | 'staging' | 'audit'>(initialTab);
-  const [localStagingAreas, setLocalStagingAreas] = useState<StagingAreaInfo[]>(() => getStoredStagingAreas());
+  const [localStagingAreas, setLocalStagingAreas] = useState<StagingAreaInfo[]>(() => propStagingAreas || getStoredStagingAreas());
 
-  const currentStagingAreas = propStagingAreas || localStagingAreas;
+  React.useEffect(() => {
+    if (propStagingAreas && propStagingAreas.length > 0) {
+      setLocalStagingAreas(propStagingAreas);
+    }
+  }, [propStagingAreas]);
+
+  const currentStagingAreas = (propStagingAreas && propStagingAreas.length > 0) ? propStagingAreas : localStagingAreas;
   const handleUpdateStaging = (updated: StagingAreaInfo[]) => {
     setLocalStagingAreas(updated);
     if (propOnUpdateStagingAreas) {

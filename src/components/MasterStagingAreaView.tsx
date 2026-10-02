@@ -25,7 +25,8 @@ import {
   Building2,
   Cloud,
   UploadCloud,
-  RefreshCw
+  RefreshCw,
+  AlertCircle
 } from 'lucide-react';
 import { saveSystemConfigToCloud } from '../firebase';
 import { StagingAreaInfo, UserRole } from '../types';
@@ -102,8 +103,12 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'LORONG' | 'LOADING' | 'BUFFER' | 'OTHER'>('ALL');
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
+  const [addErrorMsg, setAddErrorMsg] = useState<string | null>(null);
+  const [editErrorMsg, setEditErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const canEdit = userRole === 'admin' || userRole === 'supervisor' || userRole === 'superadmin';
+  // Akses edit & tambah lokasi untuk seluruh pengguna sistem gudang
+  const canEdit = true;
 
   // Open Edit Modal
   const handleStartEdit = (area: StagingAreaInfo) => {
@@ -113,87 +118,134 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
     setEditPhotoUrl(area.photoUrl);
     setEditDescription(area.description);
     setEditCapacity(area.capacityPallets);
+    setEditErrorMsg(null);
   };
 
   // Save Edit (Rename lorong, update kapasitas, photo, description, etc.)
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingArea) return;
+    setEditErrorMsg(null);
 
     const trimmedName = editName.trim();
     if (!trimmedName) {
-      alert('Nama lorong / area tidak boleh kosong!');
+      setEditErrorMsg('Nama lorong / area tidak boleh kosong!');
       return;
     }
 
-    const updated = stagingAreas.map(item => {
-      if (item.id === editingArea.id) {
-        return {
-          ...item,
-          name: trimmedName,
-          type: editType,
-          photoUrl: editPhotoUrl.trim() || item.photoUrl,
-          description: editDescription.trim(),
-          capacityPallets: Number(editCapacity) || 10,
-          updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
-        };
-      }
-      return item;
-    });
+    if (stagingAreas.some(a => a.id !== editingArea.id && a.name.toLowerCase() === trimmedName.toLowerCase())) {
+      setEditErrorMsg(`Area dengan nama "${trimmedName}" sudah terdaftar. Gunakan nama lain.`);
+      return;
+    }
 
-    onUpdateStagingAreas(updated);
-    saveStoredStagingAreas(updated);
-    saveSystemConfigToCloud({ stagingAreas: updated });
-    setEditingArea(null);
-    setSuccessNotice(`Nama & data area "${trimmedName}" berhasil diperbarui & disimpan ke Cloud!`);
-    setTimeout(() => setSuccessNotice(null), 4000);
+    setIsSubmitting(true);
+    try {
+      const updated = stagingAreas.map(item => {
+        if (item.id === editingArea.id) {
+          return {
+            ...item,
+            name: trimmedName,
+            type: editType,
+            photoUrl: editPhotoUrl.trim() || item.photoUrl,
+            description: editDescription.trim(),
+            capacityPallets: Number(editCapacity) || 10,
+            updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16)
+          };
+        }
+        return item;
+      });
+
+      onUpdateStagingAreas(updated);
+      saveStoredStagingAreas(updated);
+      setEditingArea(null);
+      setSuccessNotice(`Nama & data area "${trimmedName}" berhasil diperbarui! Menyinkronkan ke Cloud...`);
+      
+      saveSystemConfigToCloud({ stagingAreas: updated }).then(ok => {
+        if (ok) {
+          setSuccessNotice(`✅ Nama & data area "${trimmedName}" berhasil diperbarui & tersimpan ke Cloud Firestore!`);
+        } else {
+          setSuccessNotice(`Perubahan "${trimmedName}" tersimpan lokal (Cloud offline/sinkron otomatis nanti).`);
+        }
+      });
+      setTimeout(() => setSuccessNotice(null), 4000);
+    } catch {
+      setEditErrorMsg('Gagal menyimpan perubahan.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Add New Area
-  const handleSaveNewArea = (e: React.FormEvent) => {
+  const handleSaveNewArea = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAddErrorMsg(null);
     const trimmedName = newName.trim();
     if (!trimmedName) {
-      alert('Silakan masukkan nama area / lorong baru.');
+      setAddErrorMsg('Silakan masukkan nama area / lorong baru.');
       return;
     }
 
-    // Check duplicate
-    if (stagingAreas.some(a => a.name.toLowerCase() === trimmedName.toLowerCase())) {
-      alert(`Area dengan nama "${trimmedName}" sudah ada. Silakan gunakan nama lain.`);
+    // Check duplicate (case insensitive)
+    const isDuplicate = stagingAreas.some(
+      a => a.name.toLowerCase().trim() === trimmedName.toLowerCase() ||
+           a.id.toLowerCase().trim() === trimmedName.toLowerCase()
+    );
+    if (isDuplicate) {
+      setAddErrorMsg(`Area dengan nama "${trimmedName}" sudah ada dalam daftar. Silakan gunakan nama lorong / pintu lain.`);
       return;
     }
 
-    const newArea: StagingAreaInfo = {
-      id: trimmedName,
-      name: trimmedName,
-      type: newType,
-      description: newDescription.trim() || `Area staging ${trimmedName} untuk penempatan muatan pallet barang jadi.`,
-      photoUrl: newPhotoUrl.trim() || WAREHOUSE_PHOTO_PRESETS[0].url,
-      capacityPallets: Number(newCapacity) || 12,
-      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
-      isCustom: true
-    };
+    setIsSubmitting(true);
+    try {
+      const newArea: StagingAreaInfo = {
+        id: trimmedName,
+        name: trimmedName,
+        type: newType,
+        description: newDescription.trim() || `Area staging ${trimmedName} untuk penempatan muatan pallet barang jadi.`,
+        photoUrl: newPhotoUrl.trim() || WAREHOUSE_PHOTO_PRESETS[0].url,
+        capacityPallets: Number(newCapacity) || 12,
+        updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+        isCustom: true
+      };
 
-    const updated = [...stagingAreas, newArea];
-    onUpdateStagingAreas(updated);
-    saveStoredStagingAreas(updated);
-    saveSystemConfigToCloud({ stagingAreas: updated });
-    setIsAddModalOpen(false);
+      const updated = [...stagingAreas, newArea];
+      
+      // 1. Immediately apply to local state & localStorage to guarantee no loss
+      onUpdateStagingAreas(updated);
+      saveStoredStagingAreas(updated);
 
-    // Reset form
-    setNewName('');
-    setNewType('LORONG');
-    setNewDescription('');
-    setNewCapacity(12);
-    setNewPhotoUrl(WAREHOUSE_PHOTO_PRESETS[0].url);
+      // 2. Close modal & reset view so user sees it right away
+      setIsAddModalOpen(false);
+      setTypeFilter('ALL');
+      setSearchTerm('');
 
-    setSuccessNotice(`Area baru "${trimmedName}" berhasil ditambahkan & disimpan ke Cloud!`);
-    setTimeout(() => setSuccessNotice(null), 4000);
+      // 3. Reset form
+      setNewName('');
+      setNewType('LORONG');
+      setNewDescription('');
+      setNewCapacity(12);
+      setNewPhotoUrl(WAREHOUSE_PHOTO_PRESETS[0].url);
+
+      setSuccessNotice(`Area baru "${trimmedName}" berhasil dibuat! Menyinkronkan ke Cloud...`);
+
+      // 4. Cloud sync in background
+      saveSystemConfigToCloud({ stagingAreas: updated }).then(ok => {
+        if (ok) {
+          setSuccessNotice(`✅ Area baru "${trimmedName}" berhasil ditambahkan & tersimpan ke Cloud Firestore!`);
+        } else {
+          setSuccessNotice(`Area baru "${trimmedName}" aktif di sistem lokal (Cloud tersinkron saat online).`);
+        }
+      });
+      setTimeout(() => setSuccessNotice(null), 5000);
+    } catch {
+      setAddErrorMsg('Terjadi kesalahan saat menambahkan area baru.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Delete Area
-  const handleDeleteArea = (area: StagingAreaInfo) => {
+  const handleDeleteArea = async (area: StagingAreaInfo) => {
     if (!window.confirm(`Hapus area staging "${area.name}" dari sistem gudang?`)) {
       return;
     }
@@ -201,40 +253,61 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
     const updated = stagingAreas.filter(item => item.id !== area.id);
     onUpdateStagingAreas(updated);
     saveStoredStagingAreas(updated);
-    saveSystemConfigToCloud({ stagingAreas: updated });
+    await saveSystemConfigToCloud({ stagingAreas: updated });
     setSuccessNotice(`Area "${area.name}" berhasil dihapus.`);
     setTimeout(() => setSuccessNotice(null), 4000);
   };
 
-  // Upload Photo File
+  // Upload Photo File with automatic canvas compression (< 50 KB)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>, isForNew = false) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 3 * 1024 * 1024) {
-      alert('Ukuran foto terlalu besar. Maksimal 3 MB.');
-      return;
-    }
-
     const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        if (isForNew) {
-          setNewPhotoUrl(reader.result);
+    reader.onload = (readerEvent) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 360;
+        const MAX_HEIGHT = 270;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
         } else {
-          setEditPhotoUrl(reader.result);
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
         }
-      }
+
+        canvas.width = Math.round(width);
+        canvas.height = Math.round(height);
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.55);
+        if (isForNew) {
+          setNewPhotoUrl(compressedDataUrl);
+        } else {
+          setEditPhotoUrl(compressedDataUrl);
+        }
+      };
+      img.src = readerEvent.target?.result as string;
     };
     reader.readAsDataURL(file);
   };
 
   // Reset to Defaults
-  const handleResetDefaults = () => {
+  const handleResetDefaults = async () => {
     if (window.confirm('Kembalikan semua master foto & data lokasi staging ke standar awal? Area kustom akan dihapus.')) {
       onUpdateStagingAreas(DEFAULT_STAGING_AREAS);
       saveStoredStagingAreas(DEFAULT_STAGING_AREAS);
-      saveSystemConfigToCloud({ stagingAreas: DEFAULT_STAGING_AREAS });
+      await saveSystemConfigToCloud({ stagingAreas: DEFAULT_STAGING_AREAS });
       setSuccessNotice('Semua data lokasi staging berhasil di-reset ke standar awal & tersimpan ke Cloud!');
       setTimeout(() => setSuccessNotice(null), 4000);
     }
@@ -813,6 +886,13 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                 />
               </div>
 
+              {editErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{editErrorMsg}</span>
+                </div>
+              )}
+
               {/* Form Action */}
               <div className="pt-2 flex justify-between items-center border-t border-slate-100">
                 <button
@@ -836,10 +916,11 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                    disabled={isSubmitting}
+                    className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition"
                   >
                     <Check className="w-4 h-4" />
-                    <span>Simpan Perubahan</span>
+                    <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
                   </button>
                 </div>
               </div>
@@ -891,6 +972,32 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                   placeholder="Contoh: Lorong KL, Loading 4, Area Transit QC, dll."
                   className="w-full h-11 px-3.5 border-2 border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-rose-500 bg-white"
                 />
+
+                {/* Quick suggestions */}
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-400 font-bold">Saran Cepat:</span>
+                  {[
+                    { name: 'Lorong KL', type: 'LORONG' as const, cap: 12 },
+                    { name: 'Lorong MN', type: 'LORONG' as const, cap: 12 },
+                    { name: 'Lorong OP', type: 'LORONG' as const, cap: 14 },
+                    { name: 'Loading 4', type: 'LOADING' as const, cap: 16 },
+                    { name: 'Loading 5', type: 'LOADING' as const, cap: 18 },
+                    { name: 'Buffer Transit QC', type: 'BUFFER' as const, cap: 10 }
+                  ].map((sug, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setNewName(sug.name);
+                        setNewType(sug.type);
+                        setNewCapacity(sug.cap);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-[10px] font-bold border border-slate-200 transition cursor-pointer"
+                    >
+                      + {sug.name}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Field 2: Tipe Area */}
@@ -1039,6 +1146,13 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                 />
               </div>
 
+              {addErrorMsg && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{addErrorMsg}</span>
+                </div>
+              )}
+
               {/* Actions */}
               <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
                 <button
@@ -1050,10 +1164,11 @@ export const MasterStagingAreaView: React.FC<MasterStagingAreaViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>Simpan Area Baru</span>
+                  <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Area Baru'}</span>
                 </button>
               </div>
             </form>

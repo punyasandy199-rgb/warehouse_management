@@ -54,9 +54,14 @@ export const ClearDataModal: React.FC<ClearDataModalProps> = ({
     Object.values(rack.slots).forEach(slot => {
       totalSlots++;
       if (slot.status === 'occupied') {
-        occupiedSlots++;
-        if (slot.pallet) {
-          totalBoxInRacks += slot.pallet.quantityBox || 0;
+        const pCount = (slot.pallets && slot.pallets.length > 0) ? slot.pallets.length : (slot.pallet ? 1 : 1);
+        occupiedSlots += pCount;
+        if (slot.pallets && slot.pallets.length > 0) {
+          totalBoxInRacks += slot.pallets.reduce((acc, p) => acc + (p.quantityBox || 15), 0);
+        } else if (slot.pallet) {
+          totalBoxInRacks += slot.pallet.quantityBox || 15;
+        } else {
+          totalBoxInRacks += 15;
         }
       }
     });

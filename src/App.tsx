@@ -26,7 +26,7 @@ import {
   RotateCcw,
   ArrowRight
 } from 'lucide-react';
-import { getStoredStagingAreas, saveStoredStagingAreas } from './data/stagingAreas';
+import { getStoredStagingAreas, saveStoredStagingAreas, mergeStagingAreas, DEFAULT_STAGING_AREAS, STORAGE_KEY_STAGING_AREAS } from './data/stagingAreas';
 import { createInitialRacks, 
   createEmptyRacks,
   createSampleDemoRacks,
@@ -97,54 +97,57 @@ export default function App() {
   // Load State from LocalStorage or Defaults
   const [racks, setRacks] = useState<Record<string, RackData>>(() => {
     try {
-      const isSimCleared = localStorage.getItem(STORAGE_KEY_SIM_CLEARED);
-      if (isSimCleared === 'true') {
-        const saved = localStorage.getItem(STORAGE_KEY_RACKS);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          const first = Object.values(parsed)[0] as RackData | undefined;
-          if (first && first.baysList && first.baysList.includes('a') && first.baysList.includes('m')) {
-            // Normalize loaded racks to 4-pallet slots per address if needed
-            Object.values(parsed).forEach((r: any) => {
-              const locCount = r.slotsList?.length || Object.keys(r.slots || {}).length;
-              if (!r.palletsPerSlot || r.slotCount === locCount) {
-                r.palletsPerSlot = 4;
-                r.slotCount = locCount * 4;
-              }
-            });
-            return parsed;
-          }
-        }
-      } else {
-        // Automatically clear warehouse for simulation on initial run
-        localStorage.setItem(STORAGE_KEY_SIM_CLEARED, 'true');
-        localStorage.removeItem('fgw_outbound_plan_kirim_list');
-        localStorage.removeItem('fgw_outbound_transit_items');
-        localStorage.removeItem('fgw_outbound_bo_records');
-        const empty = createEmptyRacks();
-        localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(empty));
-        return empty;
-      }
-    } catch {}
-    return createEmptyRacks();
-  });
-
-  const [products, setProducts] = useState<ProductItem[]>(() => {
-    try {
-      const isSimCleared = localStorage.getItem(STORAGE_KEY_SIM_CLEARED);
-      if (isSimCleared === 'true') {
-        const saved = localStorage.getItem(STORAGE_KEY_PRODUCTS);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.some((p: any) => p.itemCode === 'FG-COF-122')) {
-            localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(INITIAL_PRODUCTS));
-            return INITIAL_PRODUCTS;
-          }
+      const saved = localStorage.getItem(STORAGE_KEY_RACKS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        const first = Object.values(parsed)[0] as RackData | undefined;
+        if (first && first.baysList && first.baysList.includes('a') && first.baysList.includes('m')) {
+          // Normalize loaded racks to 4-pallet slots per address and ensure empty rack slots (0 pallet)
+          Object.values(parsed).forEach((r: any) => {
+            const locCount = r.slotsList?.length || Object.keys(r.slots || {}).length;
+            if (!r.palletsPerSlot || r.slotCount === locCount) {
+              r.palletsPerSlot = 4;
+              r.slotCount = locCount * 4;
+            }
+            if (r.slots) {
+              Object.keys(r.slots).forEach((sKey) => {
+                if (r.slots[sKey].status === 'occupied' || r.slots[sKey].pallet || (r.slots[sKey].pallets && r.slots[sKey].pallets.length > 0)) {
+                  r.slots[sKey] = {
+                    ...r.slots[sKey],
+                    status: r.slots[sKey].status === 'maintenance' ? 'maintenance' : 'empty',
+                    pallet: undefined,
+                    pallets: [],
+                    palletSlots: undefined
+                  };
+                }
+              });
+            }
+          });
+          localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(parsed));
           return parsed;
         }
       }
     } catch {}
-    return INITIAL_PRODUCTS;
+    const empty = createEmptyRacks();
+    try {
+      localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(empty));
+    } catch {}
+    return empty;
+  });
+
+  const [products, setProducts] = useState<ProductItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_PRODUCTS);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const cleaned = parsed.map((p: any) => ({ ...p, currentStockBox: 0 }));
+          localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(cleaned));
+          return cleaned;
+        }
+      }
+    } catch {}
+    return INITIAL_PRODUCTS.map(p => ({ ...p, currentStockBox: 0 }));
   });
 
   const [users, setUsers] = useState<UserAccount[]>(() => {
@@ -468,8 +471,11 @@ export default function App() {
         if (latest.config) {
           try {
             if (latest.config.stagingAreas && Array.isArray(latest.config.stagingAreas) && latest.config.stagingAreas.length > 0) {
-              setStagingAreas(latest.config.stagingAreas);
-              saveStoredStagingAreas(latest.config.stagingAreas);
+              setStagingAreas(prev => {
+                const merged = mergeStagingAreas(latest.config.stagingAreas, prev);
+                saveStoredStagingAreas(merged);
+                return merged;
+              });
             }
             if (latest.config.rolePermissions) {
               localStorage.setItem('sikutang_role_permissions_v2', JSON.stringify(latest.config.rolePermissions));
@@ -535,9 +541,12 @@ export default function App() {
 
         // Real-time listener: System Config (Master Lokasi Staging, Lorong & Dock)
         unsubConfig = subscribeToSystemConfig((incomingConfig) => {
-          if (incomingConfig?.stagingAreas && Array.isArray(incomingConfig.stagingAreas) && incomingConfig.stagingAreas.length > 0) {
-            setStagingAreas(incomingConfig.stagingAreas);
-            saveStoredStagingAreas(incomingConfig.stagingAreas);
+          if (incomingConfig?.stagingAreas && Array.isArray(incomingConfig.stagingAreas)) {
+            setStagingAreas(prev => {
+              const merged = mergeStagingAreas(incomingConfig.stagingAreas, prev);
+              saveStoredStagingAreas(merged);
+              return merged;
+            });
           }
           if (incomingConfig?.rolePermissions) {
             try {
@@ -551,10 +560,49 @@ export default function App() {
         const cloudData = await fetchInitialCloudData();
         if (cloudData) {
           if (cloudData.racks && Object.keys(cloudData.racks).length > 0) {
-            setRacks(cloudData.racks);
+            // Check if cloud racks have any occupied slots (the 4 pallets) that need to be emptied
+            let hasOccupied = false;
+            const cleanedRacks: Record<string, RackData> = {};
+            Object.entries(cloudData.racks).forEach(([rId, r]) => {
+              cleanedRacks[rId] = {
+                ...r,
+                slots: { ...r.slots }
+              };
+              Object.keys(cleanedRacks[rId].slots).forEach(sCode => {
+                const slot = cleanedRacks[rId].slots[sCode];
+                if (slot.status === 'occupied' || slot.pallet || (slot.pallets && slot.pallets.length > 0)) {
+                  hasOccupied = true;
+                  cleanedRacks[rId].slots[sCode] = {
+                    ...slot,
+                    status: slot.status === 'maintenance' ? 'maintenance' : 'empty',
+                    pallet: undefined,
+                    pallets: [],
+                    palletSlots: undefined
+                  };
+                }
+              });
+            });
+
+            if (hasOccupied) {
+              console.log('[WMS] Mengosongkan rak yang terisi 4 pallet sesuai permintaan user...');
+              await saveAllRacksToCloud(cleanedRacks);
+              setRacks(cleanedRacks);
+              localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(cleanedRacks));
+            } else {
+              setRacks(cloudData.racks);
+            }
           }
           if (cloudData.products && cloudData.products.length > 0) {
-            setProducts(cloudData.products);
+            const hasStock = cloudData.products.some(p => p.currentStockBox > 0);
+            const cleanedProducts = cloudData.products.map(p => ({
+              ...p,
+              currentStockBox: 0
+            }));
+            setProducts(cleanedProducts);
+            localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(cleanedProducts));
+            if (hasStock) {
+              await saveAllProductsToCloud(cleanedProducts);
+            }
           }
           if (cloudData.users && cloudData.users.length > 0) {
             setUsers(cloudData.users);
@@ -565,9 +613,16 @@ export default function App() {
           if (cloudData.logs && cloudData.logs.length > 0) {
             setLogs(cloudData.logs);
           }
-          if (cloudData.config?.stagingAreas && Array.isArray(cloudData.config.stagingAreas) && cloudData.config.stagingAreas.length > 0) {
-            setStagingAreas(cloudData.config.stagingAreas);
-            saveStoredStagingAreas(cloudData.config.stagingAreas);
+          if (cloudData.config?.stagingAreas && Array.isArray(cloudData.config.stagingAreas)) {
+            setStagingAreas(prev => {
+              const merged = mergeStagingAreas(cloudData.config.stagingAreas, prev);
+              saveStoredStagingAreas(merged);
+              // If local has extra custom areas not yet in cloud, sync to cloud
+              if (merged.length > cloudData.config.stagingAreas.length) {
+                saveSystemConfigToCloud({ stagingAreas: merged });
+              }
+              return merged;
+            });
           } else {
             await saveSystemConfigToCloud({ stagingAreas });
           }
@@ -1149,7 +1204,9 @@ export default function App() {
           nextSlots[sCode] = {
             ...nextSlots[sCode],
             status: nextSlots[sCode].status === 'maintenance' ? 'maintenance' : 'empty',
-            pallet: undefined
+            pallet: undefined,
+            pallets: [],
+            palletSlots: undefined
           };
         });
         nextRacks[rId] = {
@@ -1165,9 +1222,16 @@ export default function App() {
     const remainingStockMap: Record<string, number> = {};
     Object.values(nextRacks).forEach(rack => {
       Object.values(rack.slots).forEach(slot => {
-        if (slot.status === 'occupied' && slot.pallet) {
-          const code = slot.pallet.itemCode;
-          remainingStockMap[code] = (remainingStockMap[code] || 0) + (slot.pallet.quantityBox || 0);
+        if (slot.status === 'occupied') {
+          if (slot.pallets && slot.pallets.length > 0) {
+            slot.pallets.forEach(p => {
+              const code = p.itemCode;
+              remainingStockMap[code] = (remainingStockMap[code] || 0) + (p.quantityBox || 0);
+            });
+          } else if (slot.pallet) {
+            const code = slot.pallet.itemCode;
+            remainingStockMap[code] = (remainingStockMap[code] || 0) + (slot.pallet.quantityBox || 0);
+          }
         }
       });
     });
@@ -1208,6 +1272,10 @@ export default function App() {
       localStorage.setItem(STORAGE_KEY_SIM_CLEARED, 'true');
     } catch {}
 
+    // SINKRONISASI KE CLOUD FIRESTORE AGAR STOK TIDAK MUNCUL KEMBALI DARI SERVER
+    saveAllRacksToCloud(nextRacks);
+    saveAllProductsToCloud(updatedProducts);
+
     setSimulationResetCounter(prev => prev + 1);
   };
 
@@ -1228,9 +1296,23 @@ export default function App() {
     setSimulationResetCounter(prev => prev + 1);
   };
 
-  const handleFactoryReset = () => {
+  const handleFactoryReset = async () => {
     try {
       localStorage.clear();
+      const emptyRacks = createEmptyRacks();
+      const defaultProducts = INITIAL_PRODUCTS.map(p => ({ ...p, currentStockBox: 0 }));
+      const defaultStaging = DEFAULT_STAGING_AREAS;
+
+      localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(emptyRacks));
+      localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(defaultProducts));
+      localStorage.setItem(STORAGE_KEY_USERS, JSON.stringify(INITIAL_USERS));
+      localStorage.setItem(STORAGE_KEY_EMPLOYEES, JSON.stringify(INITIAL_EMPLOYEES));
+      localStorage.setItem(STORAGE_KEY_STAGING_AREAS, JSON.stringify(defaultStaging));
+      localStorage.setItem(STORAGE_KEY_SIM_CLEARED, 'true');
+
+      await saveAllRacksToCloud(emptyRacks);
+      await saveAllProductsToCloud(defaultProducts);
+      await saveSystemConfigToCloud({ stagingAreas: defaultStaging });
     } catch {}
     window.location.reload();
   };
@@ -1494,6 +1576,7 @@ export default function App() {
             userRole={currentUser.role}
             logs={logs}
             stagingAreas={stagingAreas}
+            onUpdateStagingAreas={handleUpdateStagingAreas}
             onOpenScannerPicking={(slotCode) => {
               setScannerMode('PICKING');
               setScannerAllowedModes(['PICKING']);

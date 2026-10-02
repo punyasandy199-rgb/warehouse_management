@@ -367,6 +367,66 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
 
   const rackList = Object.values(racks).sort((a, b) => a.id.localeCompare(b.id));
 
+  // Perhitungan agregat total seluruh rak gudang (sinkron dengan Dashboard)
+  let totalMasterLocations = 0;
+  let totalMasterPalletCapacity = 0;
+  let totalMasterOccupiedPallets = 0;
+  let totalMasterOccupiedBoxes = 0;
+  let totalMasterBlockedLocations = 0;
+
+  rackList.forEach(rack => {
+    const palletsPerLoc = rack.palletsPerSlot || 4;
+    const locationCount = rack.slotsList?.length || Object.keys(rack.slots).length;
+    const rackCap = rack.slotCount && rack.slotCount > locationCount ? rack.slotCount : locationCount * palletsPerLoc;
+    
+    totalMasterLocations += locationCount;
+    totalMasterPalletCapacity += rackCap;
+
+    Object.values(rack.slots).forEach(slot => {
+      if (slot.isBlocked || slot.status === 'maintenance') {
+        totalMasterBlockedLocations++;
+      } else if (slot.status === 'occupied') {
+        const pCount = (slot.pallets && slot.pallets.length > 0) ? slot.pallets.length : (slot.pallet ? 1 : 1);
+        totalMasterOccupiedPallets += pCount;
+        if (slot.pallets && slot.pallets.length > 0) {
+          totalMasterOccupiedBoxes += slot.pallets.reduce((acc, p) => acc + (p.quantityBox || 15), 0);
+        } else if (slot.pallet) {
+          totalMasterOccupiedBoxes += slot.pallet.quantityBox || 15;
+        } else {
+          totalMasterOccupiedBoxes += 15;
+        }
+      }
+    });
+  });
+
+  const totalMasterBlockedPallets = totalMasterBlockedLocations * 4;
+  const totalMasterAvailablePallets = Math.max(0, totalMasterPalletCapacity - totalMasterOccupiedPallets - totalMasterBlockedPallets);
+  const totalMasterOccupiedKg = totalMasterOccupiedBoxes * 30;
+  const totalMasterAvailableBoxes = totalMasterAvailablePallets * 15;
+  const totalMasterAvailableKg = totalMasterAvailableBoxes * 30;
+  const totalMasterBoxCapacity = totalMasterPalletCapacity * 15;
+  const totalMasterKgCapacity = totalMasterBoxCapacity * 30;
+
+  const masterRawOccupancyPct = totalMasterPalletCapacity > 0 ? (totalMasterOccupiedPallets / totalMasterPalletCapacity) * 100 : 0;
+  const masterRawAvailablePct = totalMasterPalletCapacity > 0 ? (totalMasterAvailablePallets / totalMasterPalletCapacity) * 100 : 0;
+
+  const formatPct = (val: number, isOccupied: boolean, occCount: number): string => {
+    if (occCount === 0) return isOccupied ? '0%' : '100%';
+    if (isOccupied) {
+      if (val < 0.1 && val > 0) return `${val.toFixed(2)}%`;
+      if (val < 10) return `${val.toFixed(2)}%`;
+      return `${val.toFixed(1)}%`;
+    } else {
+      if (occCount > 0 && val >= 99) {
+        return `${val.toFixed(2)}%`;
+      }
+      return `${val.toFixed(1)}%`;
+    }
+  };
+
+  const masterOccupancyPctStr = formatPct(masterRawOccupancyPct, true, totalMasterOccupiedPallets);
+  const masterAvailablePctStr = formatPct(masterRawAvailablePct, false, totalMasterOccupiedPallets);
+
   // Live calculation helpers for modal
   const parsedPreviewSlots = parseSlotsString(daftarSlot);
   const previewLocations = parsedPreviewSlots.length;
@@ -389,8 +449,8 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
             </span>
           </div>
           <p className="text-slate-600 text-sm mt-1 max-w-3xl">
-            Konfigurasi master lokasi rak gudang. Setiap alamat lokasi (contoh <strong>A1a</strong>) memiliki kapasitas <strong>4 slot pallet</strong>. 
-            Rak A (13 baris × 4 tingkat = 52 alamat) memiliki total kapasitas <strong>208 Pallet = 3.120 Box = 93.600 Kg</strong>.
+            Pusat konfigurasi master lokasi & kapasitas rak fisik. Standar gudang: <strong>1 Pallet = 15 Box (450 Kg) &bull; 1 Box = 30 Kg</strong>.
+            Total gudang memiliki <strong>{totalMasterPalletCapacity.toLocaleString('id-ID')} Pallet Slots ({totalMasterBoxCapacity.toLocaleString('id-ID')} Box)</strong>.
           </p>
         </div>
 
@@ -421,6 +481,103 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
         </div>
       </div>
 
+      {/* SINKRONISASI TOTAL KPI MASTER RAK (SINKRON 100% DENGAN DASHBOARD) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        
+        {/* KPI 1: Kapasitas Total */}
+        <div className="bg-white p-4 rounded-2xl border-2 border-slate-200 shadow-xs">
+          <span className="text-[10px] font-black uppercase text-slate-500 tracking-wider block mb-1">
+            Kapasitas Total Master Rak
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-black font-mono text-slate-950">
+              {totalMasterPalletCapacity.toLocaleString('id-ID')}
+            </span>
+            <span className="text-xs font-black text-slate-600">Pallet Slots</span>
+          </div>
+          <div className="text-[11px] text-slate-500 mt-1 font-semibold flex items-center justify-between">
+            <span>{rackList.length} Rak &bull; {totalMasterLocations} Alamat Fisik</span>
+            <span className="text-cyan-700 font-mono font-bold">x4 Pallet</span>
+          </div>
+          <div className="mt-1 pt-1 border-t border-slate-100 text-[10px] text-slate-400 font-mono">
+            Maks: {totalMasterBoxCapacity.toLocaleString('id-ID')} Box ({totalMasterKgCapacity.toLocaleString('id-ID')} Kg)
+          </div>
+        </div>
+
+        {/* KPI 2: Pallet Terisi (Stok Aktual) */}
+        <div className="bg-white p-4 rounded-2xl border-2 border-blue-200 shadow-xs">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-black uppercase text-blue-700 tracking-wider">
+              Pallet Terisi (Stok Aktual)
+            </span>
+            <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-mono">
+              {masterOccupancyPctStr} Utilisasi
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-black font-mono text-blue-950">
+              {totalMasterOccupiedPallets}
+            </span>
+            <span className="text-xs font-black text-blue-700">Pallet Terisi</span>
+          </div>
+          <div className="text-[11px] text-blue-900 mt-1 font-bold flex items-center justify-between">
+            <span>{totalMasterOccupiedBoxes} BOX Barang Jadi</span>
+            <span className="font-mono text-slate-500 font-normal">{totalMasterOccupiedKg.toLocaleString('id-ID')} Kg</span>
+          </div>
+          <div className="mt-1 pt-1 border-t border-blue-100 text-[10px] text-blue-700 font-semibold">
+            Sinkron dengan Total Box Dashboard
+          </div>
+        </div>
+
+        {/* KPI 3: Pallet Tersedia (Available) */}
+        <div className="bg-white p-4 rounded-2xl border-2 border-emerald-300 shadow-xs">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[10px] font-black uppercase text-emerald-700 tracking-wider">
+              Ketersediaan Pallet Available
+            </span>
+            <span className="text-[10px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-mono">
+              {masterAvailablePctStr} Kosong
+            </span>
+          </div>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-black font-mono text-emerald-950">
+              {totalMasterAvailablePallets.toLocaleString('id-ID')}
+            </span>
+            <span className="text-xs font-black text-emerald-700">Pallet Siap Pakai</span>
+          </div>
+          <div className="text-[11px] text-emerald-900 mt-1 font-bold flex items-center justify-between">
+            <span>{totalMasterAvailableBoxes.toLocaleString('id-ID')} Box Potensial</span>
+            <span className="font-mono text-slate-500 font-normal">{totalMasterAvailableKg.toLocaleString('id-ID')} Kg</span>
+          </div>
+          <div className="mt-1 pt-1 border-t border-emerald-100 text-[10px] text-emerald-700 font-semibold">
+            Sinkron dengan Pallet Available Dashboard
+          </div>
+        </div>
+
+        {/* KPI 4: Kendala Fisik Lapangan */}
+        <div className="bg-white p-4 rounded-2xl border-2 border-amber-200 shadow-xs">
+          <span className="text-[10px] font-black uppercase text-amber-700 tracking-wider block mb-1">
+            Status Fisik Lapangan
+          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span className="text-2xl font-black font-mono text-amber-950">
+              {totalMasterBlockedLocations}
+            </span>
+            <span className="text-xs font-black text-amber-700">Alamat Terkendala</span>
+          </div>
+          <div className="text-[11px] text-slate-600 mt-1 font-semibold flex items-center justify-between">
+            <span>{totalMasterBlockedPallets} Pallet Diblokir</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 font-bold">
+              {totalMasterBlockedLocations === 0 ? 'Normal 100%' : 'Maintenance'}
+            </span>
+          </div>
+          <div className="mt-1 pt-1 border-t border-amber-100 text-[10px] text-slate-400">
+            Dikelola via tombol Kendala di tabel
+          </div>
+        </div>
+
+      </div>
+
       {/* Main Table */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-50/50">
@@ -430,14 +587,14 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
               {rackList.length} Rak Terdaftar
             </span>
           </div>
-          <div className="text-xs text-slate-500 font-medium flex items-center gap-3">
+          <div className="text-xs text-slate-500 font-medium flex items-center gap-3 flex-wrap">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
               Kapasitas Baku: 4 Pallet/Alamat (60 Box / 1.800 Kg)
             </span>
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span>
-              Manajemen Kendala Lapangan Aktif
+              Standar Produk: 1 Box = 30 Kg
             </span>
           </div>
         </div>
@@ -466,9 +623,29 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
                 const maxWeightKg = maxBoxes * 30;
 
                 const allSlots = Object.values(rack.slots);
-                const occupiedCount = allSlots.filter(s => s.status === 'occupied').length;
+                const occupiedSlotsCount = allSlots.filter(s => s.status === 'occupied').length;
+                const occupiedPalletsInRack = allSlots.reduce((acc, s) => {
+                  if (s.status === 'occupied') {
+                    const pCount = (s.pallets && s.pallets.length > 0) ? s.pallets.length : (s.pallet ? 1 : 1);
+                    return acc + pCount;
+                  }
+                  return acc;
+                }, 0);
+                const actualBoxesInRack = allSlots.reduce((acc, s) => {
+                  if (s.status === 'occupied') {
+                    if (s.pallets && s.pallets.length > 0) {
+                      return acc + s.pallets.reduce((pAcc, p) => pAcc + (p.quantityBox || 15), 0);
+                    } else if (s.pallet) {
+                      return acc + (s.pallet?.quantityBox || 15);
+                    }
+                    return acc + 15;
+                  }
+                  return acc;
+                }, 0);
                 const blockedSlots = allSlots.filter(s => s.isBlocked || s.status === 'maintenance');
-                const occupancyPercent = totalPalletCapacity > 0 ? Math.round((occupiedCount / totalPalletCapacity) * 100) : 0;
+                const rawOccupancy = totalPalletCapacity > 0 ? (occupiedPalletsInRack / totalPalletCapacity) * 100 : 0;
+                const occupancyPercent = formatPct(rawOccupancy, true, occupiedPalletsInRack);
+                const rawBarWidth = Math.max(occupiedPalletsInRack > 0 ? 3 : 0, Math.min(100, rawOccupancy));
 
                 return (
                   <tr key={rack.id} className="hover:bg-cyan-50/40 transition-colors">
@@ -555,19 +732,19 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
                     <td className="py-4 px-6">
                       <div className="w-36 mx-auto">
                         <div className="flex justify-between text-xs mb-1 font-semibold">
-                          <span className="text-cyan-800 font-mono">{occupiedCount} Terisi</span>
-                          <span className="text-slate-600">{occupancyPercent}%</span>
+                          <span className="text-cyan-800 font-mono font-bold">{occupiedPalletsInRack} Pallet Terisi</span>
+                          <span className="text-slate-600 font-mono">{occupancyPercent}</span>
                         </div>
                         <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
                           <div
-                            className={`h-full rounded-full ${
-                              occupancyPercent > 80 ? 'bg-amber-500' : 'bg-cyan-500'
+                            className={`h-full rounded-full transition-all duration-300 ${
+                              rawOccupancy > 80 ? 'bg-amber-500' : 'bg-cyan-500'
                             }`}
-                            style={{ width: `${Math.min(100, occupancyPercent)}%` }}
+                            style={{ width: `${rawBarWidth}%` }}
                           />
                         </div>
-                        <span className="text-[10px] text-slate-500 block text-center mt-1">
-                          {occupiedCount * 15} Box Terdata
+                        <span className="text-[10px] text-slate-500 block text-center mt-1 font-mono">
+                          {actualBoxesInRack} Box ({actualBoxesInRack * 30} Kg)
                         </span>
                       </div>
                     </td>
@@ -629,6 +806,52 @@ export const MasterRakView: React.FC<MasterRakViewProps> = ({
                 );
               })}
             </tbody>
+
+            {/* FOOTER TOTAL SINKRON DENGAN DASHBOARD */}
+            <tfoot className="bg-slate-100/90 border-t-2 border-slate-300 text-xs font-bold text-slate-900">
+              <tr>
+                <td className="py-3.5 px-6">
+                  <div className="font-black text-slate-950">
+                    TOTAL KESELURUHAN ({rackList.length} RAK)
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-semibold">
+                    {totalMasterLocations} Alamat Fisik × 4 Pallet/Slot
+                  </div>
+                </td>
+                <td className="py-3.5 px-6">
+                  <span className="text-[11px] text-slate-500">Semua Finished Goods</span>
+                </td>
+                <td className="py-3.5 px-6 text-center">
+                  <div className="font-mono font-black text-sm text-slate-950">
+                    {totalMasterPalletCapacity.toLocaleString('id-ID')} Pallet Slots
+                  </div>
+                  <div className="text-[10px] text-emerald-800 font-mono">
+                    {totalMasterBoxCapacity.toLocaleString('id-ID')} Box ({totalMasterKgCapacity.toLocaleString('id-ID')} Kg)
+                  </div>
+                </td>
+                <td className="py-3.5 px-6 text-center">
+                  <div className="font-mono font-bold text-amber-800">
+                    {totalMasterBlockedLocations} Alamat Fisik
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono">
+                    ({totalMasterBlockedPallets} Pallet)
+                  </div>
+                </td>
+                <td className="py-3.5 px-6 text-center">
+                  <div className="font-mono font-black text-sm text-blue-900">
+                    {totalMasterOccupiedPallets} Terisi ({totalMasterOccupiedBoxes} Box)
+                  </div>
+                  <div className="text-[10px] font-bold text-blue-700">
+                    Utilisasi: {masterOccupancyPctStr} Kapasitas
+                  </div>
+                </td>
+                <td className="py-3.5 px-6 text-right">
+                  <span className="text-[11px] text-slate-500 font-mono">
+                    Available: {totalMasterAvailablePallets.toLocaleString('id-ID')} Pallet
+                  </span>
+                </td>
+              </tr>
+            </tfoot>
           </table>
         </div>
       </div>

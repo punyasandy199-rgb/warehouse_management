@@ -56,7 +56,8 @@ import {
   ICStatus
 } from '../types';
 import { parseSlotCode, findMatchingSlotKey } from '../utils/barcode';
-import { getStoredStagingAreas } from '../data/stagingAreas';
+import { getStoredStagingAreas, saveStoredStagingAreas } from '../data/stagingAreas';
+import { saveSystemConfigToCloud } from '../firebase';
 
 const STORAGE_KEY_PLAN_KIRIM = 'fgw_outbound_plan_kirim_list';
 const STORAGE_KEY_TRANSIT = 'fgw_outbound_transit_items';
@@ -86,6 +87,7 @@ interface OutWarehouseViewProps {
   userRole: UserRole;
   logs: ActivityLog[];
   stagingAreas?: StagingAreaInfo[];
+  onUpdateStagingAreas?: (areas: StagingAreaInfo[]) => void;
   onOpenScannerPicking: (slotCode?: string) => void;
   onExecutePickingDirect: (slotCode: string, note?: string, actionType?: ActivityLog['action'], shouldDeductStock?: boolean) => void;
   onExecuteRelocateDirect: (srcSlot: string, tgtSlot: string, note?: string, newIcStatus?: ICStatus) => void;
@@ -102,6 +104,7 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
   userRole,
   logs,
   stagingAreas: propStagingAreas,
+  onUpdateStagingAreas,
   onOpenScannerPicking,
   onExecutePickingDirect,
   onExecuteRelocateDirect,
@@ -119,17 +122,69 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
   });
 
   useEffect(() => {
-    if (propStagingAreas) {
+    if (propStagingAreas && propStagingAreas.length > 0) {
       setMasterStagingAreas(propStagingAreas);
     }
   }, [propStagingAreas]);
 
-  const availableStagingLocations = masterStagingAreas && masterStagingAreas.length > 0
-    ? masterStagingAreas.map(a => a.name)
+  const activeStagingList = (propStagingAreas && propStagingAreas.length > 0) ? propStagingAreas : masterStagingAreas;
+  const availableStagingLocations = activeStagingList && activeStagingList.length > 0
+    ? activeStagingList.map(a => a.name)
     : STAGING_LOCATIONS;
 
   // Modal preview foto area
   const [previewAreaModal, setPreviewAreaModal] = useState<StagingAreaInfo | null>(null);
+
+  // Quick Add Staging Area from Outbound
+  const [isAddStagingModalOpen, setIsAddStagingModalOpen] = useState(false);
+  const [newStagingName, setNewStagingName] = useState('');
+  const [newStagingType, setNewStagingType] = useState<'LORONG' | 'LOADING' | 'BUFFER' | 'OTHER'>('LORONG');
+  const [newStagingCap, setNewStagingCap] = useState(12);
+  const [newStagingError, setNewStagingError] = useState<string | null>(null);
+
+  const handleSaveQuickStagingArea = (e: React.FormEvent) => {
+    e.preventDefault();
+    setNewStagingError(null);
+    const trimmed = newStagingName.trim();
+    if (!trimmed) {
+      setNewStagingError('Silakan masukkan nama area / lorong.');
+      return;
+    }
+
+    if (activeStagingList.some(a => a.name.toLowerCase().trim() === trimmed.toLowerCase() || a.id.toLowerCase().trim() === trimmed.toLowerCase())) {
+      setNewStagingError(`Area dengan nama "${trimmed}" sudah terdaftar.`);
+      return;
+    }
+
+    const newArea: StagingAreaInfo = {
+      id: trimmed,
+      name: trimmed,
+      type: newStagingType,
+      description: `Area staging ${trimmed} untuk persiapan muatan pengiriman outbound.`,
+      photoUrl: 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80',
+      capacityPallets: Number(newStagingCap) || 12,
+      updatedAt: new Date().toISOString().replace('T', ' ').slice(0, 16),
+      isCustom: true
+    };
+
+    const updated = [...activeStagingList, newArea];
+    setMasterStagingAreas(updated);
+    if (onUpdateStagingAreas) {
+      onUpdateStagingAreas(updated);
+    }
+    saveStoredStagingAreas(updated);
+    saveSystemConfigToCloud({ stagingAreas: updated });
+
+    // Automatically select the new staging location for current plan
+    setStagingLocation(trimmed);
+    setIsAddStagingModalOpen(false);
+    setNewStagingName('');
+    setNewStagingType('LORONG');
+    setNewStagingCap(12);
+
+    setPlanSaveSuccess(`✅ Area staging baru "${trimmed}" berhasil dibuat & langsung terpilih!`);
+    setTimeout(() => setPlanSaveSuccess(null), 5000);
+  };
 
   // ==========================================
   // STATE: 1. PREPARE PLAN KIRIM
@@ -1092,6 +1147,21 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                         </div>
                       );
                     })}
+
+                    {/* Tombol Tambah Area / Lorong Baru Langsung dari Outbound */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewStagingName('');
+                        setNewStagingError(null);
+                        setIsAddStagingModalOpen(true);
+                      }}
+                      className="h-12 px-3 rounded-xl border-2 border-dashed border-rose-300 hover:border-rose-600 hover:bg-rose-50/70 text-rose-700 font-bold text-xs transition cursor-pointer flex items-center justify-center gap-1.5 group shrink-0"
+                      title="Tambah Lorong / Pintu Loading Staging Baru"
+                    >
+                      <Plus className="w-4 h-4 group-hover:scale-110 transition-transform text-rose-600" />
+                      <span>+ Tambah Area</span>
+                    </button>
                   </div>
                 </div>
 
@@ -2692,6 +2762,151 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: TAMBAH LOKASI STAGING BARU LANGSUNG DARI OUTBOUND */}
+      {isAddStagingModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl animate-in zoom-in-95 duration-200 my-auto">
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-rose-100 text-rose-700 flex items-center justify-center font-bold">
+                  <Plus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base text-slate-900">
+                    Tambah Area Staging Baru
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Daftarkan lorong atau pintu loading langsung untuk Plan Kirim
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAddStagingModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-600 flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveQuickStagingArea} className="p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-black text-slate-800 mb-1">
+                  Nama Area / Lorong Staging: *
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  value={newStagingName}
+                  onChange={(e) => setNewStagingName(e.target.value)}
+                  placeholder="Contoh: Lorong KL, Loading 4, dll."
+                  className="w-full h-11 px-3.5 border-2 border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:outline-none focus:border-rose-500 bg-white"
+                />
+
+                {/* Quick suggestions */}
+                <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                  <span className="text-[10px] text-slate-400 font-bold">Saran:</span>
+                  {[
+                    { name: 'Lorong KL', type: 'LORONG' as const, cap: 12 },
+                    { name: 'Lorong MN', type: 'LORONG' as const, cap: 12 },
+                    { name: 'Loading 4', type: 'LOADING' as const, cap: 16 },
+                    { name: 'Loading 5', type: 'LOADING' as const, cap: 18 },
+                    { name: 'Buffer Transit QC', type: 'BUFFER' as const, cap: 10 }
+                  ].map((sug, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => {
+                        setNewStagingName(sug.name);
+                        setNewStagingType(sug.type);
+                        setNewStagingCap(sug.cap);
+                      }}
+                      className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 text-[10px] font-bold border border-slate-200 transition cursor-pointer"
+                    >
+                      + {sug.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-800 mb-1">
+                  Kategori Area:
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setNewStagingType('LORONG')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold text-left transition cursor-pointer ${
+                      newStagingType === 'LORONG'
+                        ? 'bg-rose-50 border-rose-500 text-rose-900 ring-1 ring-rose-500/30'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="font-extrabold text-rose-700">Lorong Buffer</div>
+                    <div className="text-[10px] font-normal opacity-80">Jalur antar rak</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewStagingType('LOADING')}
+                    className={`p-2.5 rounded-xl border text-xs font-bold text-left transition cursor-pointer ${
+                      newStagingType === 'LOADING'
+                        ? 'bg-amber-50 border-amber-500 text-amber-900 ring-1 ring-amber-500/30'
+                        : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <div className="font-extrabold text-amber-700">Loading Dock</div>
+                    <div className="text-[10px] font-normal opacity-80">Pintu muat ekspedisi</div>
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-800 mb-1">
+                  Estimasi Kapasitas Muat (Pallet):
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={newStagingCap}
+                    onChange={(e) => setNewStagingCap(Number(e.target.value))}
+                    className="w-28 h-10 px-3 border border-slate-300 rounded-xl text-sm font-black font-mono text-slate-900 focus:outline-none focus:border-rose-500"
+                  />
+                  <span className="text-xs font-bold text-slate-500">Pallet</span>
+                </div>
+              </div>
+
+              {newStagingError && (
+                <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl text-xs font-bold text-rose-700 flex items-center gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{newStagingError}</span>
+                </div>
+              )}
+
+              <div className="pt-2 flex justify-end gap-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAddStagingModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 font-bold text-xs rounded-xl hover:bg-slate-100 cursor-pointer"
+                >
+                  Batal
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs cursor-pointer flex items-center gap-1.5 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Simpan & Pilih Lokasi</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

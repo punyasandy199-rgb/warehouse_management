@@ -375,14 +375,84 @@ export function subscribeToSystemConfig(callback: (config: any) => void) {
   });
 }
 
+// Helper to prevent base64 images from bloating system_data/config over Firestore's 1MB limit
+function sanitizeStagingAreasForCloud(areas: any[]): any[] {
+  if (!Array.isArray(areas)) return [];
+  return areas.map(area => {
+    if (!area) return area;
+    let photoUrl = area.photoUrl;
+    // If photoUrl is an oversized base64 data URI (over 30KB), replace with clean preset URL
+    if (typeof photoUrl === 'string' && photoUrl.startsWith('data:') && photoUrl.length > 30000) {
+      const fallbackUrl = area.type === 'LOADING'
+        ? 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=800&q=80'
+        : 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80';
+      photoUrl = fallbackUrl;
+    }
+    return {
+      ...area,
+      photoUrl
+    };
+  });
+}
+
 export async function saveSystemConfigToCloud(data: {
   stagingAreas?: any[];
   rolePermissions?: any;
-}) {
+}): Promise<boolean> {
   try {
-    await setDoc(doc(db, 'system_data', 'config'), cleanForFirestore(data), { merge: true });
+    const payload: any = {};
+    if (data.rolePermissions) {
+      payload.rolePermissions = data.rolePermissions;
+    }
+    if (data.stagingAreas && Array.isArray(data.stagingAreas)) {
+      payload.stagingAreas = sanitizeStagingAreasForCloud(data.stagingAreas);
+    }
+
+    let cleaned = cleanForFirestore(payload);
+
+    // Safeguard check against Firestore 1 MiB (1,048,576 bytes) document size limit
+    const jsonStr = JSON.stringify(cleaned);
+    if (jsonStr.length > 900000) {
+      console.warn('[Firebase] System config payload near limit (' + jsonStr.length + ' bytes). Sanitizing all data URLs...');
+      if (payload.stagingAreas) {
+        payload.stagingAreas = payload.stagingAreas.map((a: any) => ({
+          ...a,
+          photoUrl: typeof a.photoUrl === 'string' && a.photoUrl.startsWith('data:')
+            ? (a.type === 'LOADING'
+                ? 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=800&q=80'
+                : 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80')
+            : a.photoUrl
+        }));
+      }
+      cleaned = cleanForFirestore(payload);
+    }
+
+    await setDoc(doc(db, 'system_data', 'config'), cleaned, { merge: true });
+    return true;
   } catch (err) {
     console.error('[Firebase] Failed to save system config:', err);
+    // Automatic recovery fallback if Firestore throws document size limit exceeded
+    try {
+      console.log('[Firebase] Attempting recovery write for system config with lightweight URLs...');
+      const fallbackPayload: any = {};
+      if (data.rolePermissions) fallbackPayload.rolePermissions = data.rolePermissions;
+      if (data.stagingAreas && Array.isArray(data.stagingAreas)) {
+        fallbackPayload.stagingAreas = data.stagingAreas.map((a: any) => ({
+          ...a,
+          photoUrl: typeof a.photoUrl === 'string' && a.photoUrl.startsWith('data:')
+            ? (a.type === 'LOADING'
+                ? 'https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=800&q=80'
+                : 'https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=800&q=80')
+            : a.photoUrl
+        }));
+      }
+      await setDoc(doc(db, 'system_data', 'config'), cleanForFirestore(fallbackPayload));
+      console.log('[Firebase] Recovery write succeeded!');
+      return true;
+    } catch (fallbackErr) {
+      console.error('[Firebase] Recovery write failed:', fallbackErr);
+      return false;
+    }
   }
 }
 

@@ -60,29 +60,53 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
       if (isBlocked) {
         blockedPallets += palletsPerLoc;
       } else if (slot.status === 'occupied') {
-        occupiedPallets++;
-        const b = slot.pallet?.quantityBox || 15;
-        totalBoxes += b;
+        const pCount = (slot.pallets && slot.pallets.length > 0) ? slot.pallets.length : (slot.pallet ? 1 : 1);
+        occupiedPallets += pCount;
+        if (slot.pallets && slot.pallets.length > 0) {
+          totalBoxes += slot.pallets.reduce((acc, p) => acc + (p.quantityBox || 15), 0);
+        } else if (slot.pallet) {
+          totalBoxes += slot.pallet.quantityBox || 15;
+        } else {
+          totalBoxes += 15;
+        }
       }
     });
   });
 
   const emptyPallets = Math.max(0, totalPallets - occupiedPallets - blockedPallets);
 
-  // Rumus Konversi Permintaan User:
-  // Pallet dikonversi dikali 15 QTY Box
-  // Pallet dikonversi dikali 30 Kg (in kg)
-  const emptyBoxConversion = emptyPallets * 15;
-  const emptyKgConversion = emptyPallets * 30;
+  // Helper untuk menampilkan persentase akurat tanpa pembulatan liar
+  const rawOccupancyPct = totalPallets > 0 ? (occupiedPallets / totalPallets) * 100 : 0;
+  const rawAvailablePct = totalPallets > 0 ? (emptyPallets / totalPallets) * 100 : 0;
 
-  const totalBoxCapacity = totalPallets * 15;
-  const totalKgCapacity = totalPallets * 30;
+  const formatPercentage = (val: number, isOccupied: boolean, occCount: number): string => {
+    if (occCount === 0) return isOccupied ? '0%' : '100%';
+    if (isOccupied) {
+      if (val < 0.1 && val > 0) return `${val.toFixed(2)}%`;
+      if (val < 10) return `${val.toFixed(2)}%`;
+      return `${val.toFixed(1)}%`;
+    } else {
+      if (occCount > 0 && val >= 99) {
+        return `${val.toFixed(2)}%`; // e.g. 99.79%
+      }
+      return `${val.toFixed(1)}%`;
+    }
+  };
 
-  const occupiedBoxConversion = occupiedPallets * 15;
-  const occupiedKgConversion = occupiedPallets * 30;
+  const occupancyPctText = formatPercentage(rawOccupancyPct, true, occupiedPallets); // e.g. "0.21%"
+  const availablePctText = formatPercentage(rawAvailablePct, false, occupiedPallets); // e.g. "99.79%" atau "100%" saat kosong
 
-  const overallOccupancyPct = totalPallets > 0 ? Math.round((occupiedPallets / totalPallets) * 100) : 0;
-  const overallAvailablePct = totalPallets > 0 ? Math.round((emptyPallets / totalPallets) * 100) : 0;
+  // Standar Warehouse SIKUTANG (SIC Finished Goods):
+  // 1 Pallet = 15 Box (15 x 30 Kg = 450 Kg per pallet)
+  // 1 Box = 30 Kg
+  const finalOccupiedBoxes = totalBoxes > 0 ? totalBoxes : occupiedPallets * 15;
+  const finalOccupiedKg = finalOccupiedBoxes * 30; // 60 Box x 30 Kg = 1.800 Kg
+
+  const emptyBoxConversion = emptyPallets * 15; // 1.884 Pallet x 15 = 28.260 Box
+  const emptyKgConversion = emptyBoxConversion * 30; // 28.260 Box x 30 Kg = 847.800 Kg
+
+  const totalBoxCapacity = totalPallets * 15; // 1.888 Pallet x 15 = 28.320 Box
+  const totalKgCapacity = totalBoxCapacity * 30; // 28.320 Box x 30 Kg = 849.600 Kg
 
   const currentRack = racks[activeRackId] || Object.values(racks)[0];
 
@@ -97,8 +121,8 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
             Dashboard Kapasitas Gudang & Kuantitas Barang Jadi
           </h2>
         </div>
-        <p className="text-[11px] text-slate-500">
-          Standar Gudang: 1 Pallet = 15 Box = 30 Kg
+        <p className="text-[11px] text-slate-500 font-semibold">
+          Standar Gudang: 1 Pallet = 15 Box (450 Kg) &bull; 1 Box = 30 Kg
         </p>
       </div>
 
@@ -120,7 +144,7 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
             <div>
               <div className="flex items-baseline gap-1.5">
                 <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono tracking-tight">
-                  {(totalBoxes > 0 ? totalBoxes : occupiedBoxConversion).toLocaleString('id-ID')}
+                  {finalOccupiedBoxes.toLocaleString('id-ID')}
                 </span>
                 <span className="text-xs sm:text-sm font-black text-blue-700">BOX</span>
               </div>
@@ -128,7 +152,7 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
                 <Scale className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                 <span className="text-slate-500 text-[11px]">Total Kuantitas:</span>
                 <span className="font-mono font-black text-blue-900 text-xs sm:text-sm">
-                  {occupiedKgConversion.toLocaleString('id-ID')} Kg
+                  {finalOccupiedKg.toLocaleString('id-ID')} Kg
                 </span>
               </div>
             </div>
@@ -147,20 +171,20 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
             <div className="bg-blue-50/70 p-1.5 rounded-lg border border-blue-200/60">
               <span className="block text-[10px] text-slate-500 font-semibold">Utilisasi Rak:</span>
               <span className="font-mono font-black text-blue-900 text-xs">
-                {overallOccupancyPct}% Kapasitas
+                {occupancyPctText} Kapasitas
               </span>
             </div>
           </div>
         </div>
 
-        {/* Card 2: KETERSEDIAAN PALLET RAK GUDANG (DIUBAH KE PALLET + KONVERSI x15 BOX & x30 KG) */}
+        {/* Card 2: KETERSEDIAAN PALLET RAK GUDANG */}
         <div className="bg-white rounded-2xl p-3 sm:p-3.5 border-2 border-emerald-300 shadow-xs flex flex-col justify-between gap-2">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
               Ketersediaan Pallet Rak Gudang
             </span>
             <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full font-mono">
-              {overallAvailablePct}% Kosong
+              {availablePctText} Kosong
             </span>
           </div>
 
@@ -181,7 +205,7 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
             </div>
           </div>
 
-          {/* Konversi Sesuai Permintaan User: dikali 15 QTY Box & dikali 30 Kg (in kg) */}
+          {/* Konversi Sesuai Permintaan User: dikali 15 QTY Box & dikali 30 Kg per Box */}
           <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-emerald-100">
             <div className="bg-emerald-50/80 p-1.5 rounded-lg border border-emerald-200/60">
               <span className="block text-[10px] font-bold text-slate-500">Konversi QTY Box (x15):</span>
@@ -197,10 +221,10 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5">
-            <span>Kapasitas: <strong className="text-slate-800 font-mono">{totalPallets} Pallet</strong> ({totalBoxCapacity.toLocaleString('id-ID')} Box)</span>
+          <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 flex-wrap gap-1">
+            <span>Kapasitas: <strong className="text-slate-800 font-mono">{totalPallets.toLocaleString('id-ID')} Pallet</strong> ({totalBoxCapacity.toLocaleString('id-ID')} Box / {totalKgCapacity.toLocaleString('id-ID')} Kg)</span>
             <span>&bull;</span>
-            <span>Terisi: <strong className="text-blue-700 font-mono">{occupiedPallets} Pallet</strong></span>
+            <span>Terisi: <strong className="text-blue-700 font-mono">{occupiedPallets} Pallet</strong> ({finalOccupiedBoxes} Box / {finalOccupiedKg.toLocaleString('id-ID')} Kg)</span>
           </div>
         </div>
 
@@ -273,7 +297,8 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
 
             const rackBlockedPallets = rackBlockedLocations * palletsPerLoc;
             const rackEmpty = Math.max(0, rackPalletCapacity - rackOccupied - rackBlockedPallets);
-            const rackPct = rackPalletCapacity > 0 ? Math.round((rackOccupied / rackPalletCapacity) * 100) : 0;
+            const rackPct = rackPalletCapacity > 0 ? (rackOccupied / rackPalletCapacity) * 100 : 0;
+            const rackPctText = formatPercentage(rackPct, true, rackOccupied);
 
             return (
               <div
@@ -346,11 +371,11 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
                   <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
                     <div 
                       className={`h-full rounded-full transition-all duration-300 ${rackPct > 80 ? 'bg-rose-500' : rackPct > 50 ? 'bg-amber-500' : 'bg-blue-600'}`}
-                      style={{ width: `${rackPct}%` }}
+                      style={{ width: `${Math.max(rackOccupied > 0 ? 3 : 0, Math.min(100, rackPct))}%` }}
                     ></div>
                   </div>
                   <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-slate-500 font-bold">{rackPct}% Terisi</span>
+                    <span className="text-slate-500 font-bold">{rackPctText} Terisi</span>
                     <span className={`font-bold flex items-center gap-0.5 ${isSelected ? 'text-blue-700 font-black' : 'text-slate-400'}`}>
                       <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
                       <ChevronRight className="w-3 h-3" />
