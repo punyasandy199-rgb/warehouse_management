@@ -142,6 +142,32 @@ const MODE_CONFIGS: Record<ScannerMode, {
   }
 };
 
+/**
+ * Calculates the next sequential pallet number with format KP-001, KP-002, etc.
+ * Checks all existing pallets across warehouse racks to guarantee uniqueness.
+ */
+export function getNextKpPalletNumber(allRacks: Record<string, RackData>): string {
+  let maxKp = 0;
+  for (const r of Object.values(allRacks || {})) {
+    if (!r || !r.slots) continue;
+    for (const s of Object.values(r.slots)) {
+      const pList = s.pallets && s.pallets.length > 0 ? s.pallets : (s.pallet ? [s.pallet] : []);
+      for (const p of pList) {
+        const pNo = p.palletNumber || p.palletId || '';
+        const match = pNo.match(/KP-?(\d+)/i);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (!isNaN(num) && num > maxKp) {
+            maxKp = num;
+          }
+        }
+      }
+    }
+  }
+  const nextNum = maxKp + 1;
+  return `KP-${String(nextNum).padStart(3, '0')}`;
+}
+
 export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   isOpen,
   onClose,
@@ -205,7 +231,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [parsedFgQr, setParsedFgQr] = useState<ParsedFinishedGoodsQr | null>(null);
   const [cartonStart, setCartonStart] = useState<number>(72);
   const [cartonEnd, setCartonEnd] = useState<number>(86);
-  const [palletNumber, setPalletNumber] = useState<string>('PLT-A-01');
+  const [palletNumber, setPalletNumber] = useState<string>(() => getNextKpPalletNumber(racks));
   const [operatorNote, setOperatorNote] = useState<string>('');
   const [icStatus, setIcStatus] = useState<ICStatus>('OK');
   const [scannedCartons, setScannedCartons] = useState<Array<{
@@ -220,12 +246,42 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [targetSlot, setTargetSlot] = useState(prefilledSlotCode || 'A1a');
   const [putawaySuccess, setPutawaySuccess] = useState(false);
 
-  // Reset icStatus when modal is opened
+  // Helper to ensure Pallet Number adheres to "KP-001" format
+  const formatToKpPallet = (val: string): string => {
+    const clean = (val || '').trim().toUpperCase();
+    if (!clean) return getNextKpPalletNumber(racks);
+    const numMatch = clean.match(/(\d+)/);
+    if (numMatch) {
+      const num = parseInt(numMatch[1], 10);
+      return `KP-${String(num).padStart(3, '0')}`;
+    }
+    return clean.startsWith('KP-') ? clean : `KP-${clean}`;
+  };
+
+  // Quick increment for consecutive pallets (KP-001 -> KP-002, etc.)
+  const handleIncrementPalletNumber = () => {
+    const match = palletNumber.match(/KP-?(\d+)/i);
+    if (match) {
+      const current = parseInt(match[1], 10);
+      setPalletNumber(`KP-${String(current + 1).padStart(3, '0')}`);
+    } else {
+      setPalletNumber(getNextKpPalletNumber(racks));
+    }
+    soundManager.playScanSuccess();
+  };
+
+  // Reset icStatus and synchronize palletNumber with standard KP format when modal is opened
   useEffect(() => {
     if (isOpen) {
       setIcStatus('OK');
+      setPalletNumber(prev => {
+        if (!prev || prev.startsWith('PLT-') || prev === 'PLT-A-01' || prev === 'PLT-A-02') {
+          return getNextKpPalletNumber(racks);
+        }
+        return prev;
+      });
     }
-  }, [isOpen]);
+  }, [isOpen, racks]);
 
   // Lookup result state
   const [lookupResult, setLookupResult] = useState<{
@@ -296,17 +352,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   }, [initialMode]);
 
-  // Reset putaway wizard when switching mode
+  // Reset putaway wizard state
   useEffect(() => {
     if (mode === 'PUTAWAY') {
       setPutawaySuccess(false);
-      if (!parsedFgQr) {
-        // Initialize default sample parser
-        const initial = parseFinishedGoodsQrCode(SAMPLE_FG_QR_CODE);
-        setParsedFgQr(initial);
-        setCartonEnd(initial.cartonNumber);
-        setCartonStart(Math.max(1, initial.cartonNumber - 14));
-      }
     }
   }, [mode]);
 
@@ -638,6 +687,39 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
+    // 1. Check if it's a Pallet Number (format: KP-001 s/d seterusnya, KPxxx, or PLT-...)
+    const isPalletMatch = /^(?:KP|PALLET|PLT)[-_ ]?(\d+)/i.test(code) ||
+      /^KP[-_ ]?\d+/i.test(code) ||
+      /^KP\d+/i.test(code) ||
+      /PALLET[-_ ]?(\d+)/i.test(code);
+    if (isPalletMatch) {
+      let normalizedPallet = code.toUpperCase();
+      const numMatch = code.match(/(\d+)/);
+      if (numMatch) {
+        const num = parseInt(numMatch[1], 10);
+        normalizedPallet = `KP-${String(num).padStart(3, '0')}`;
+      }
+
+      if (mode === 'PUTAWAY') {
+        setPalletNumber(normalizedPallet);
+        setOption2Notice(`✓ Nomor Pallet ${normalizedPallet} berhasil terbaca dari scanner/kamera!`);
+        return;
+      } else if (mode === 'PICKING') {
+        for (const r of Object.values(racks)) {
+          for (const s of Object.values(r.slots)) {
+            if (s.pallet && (
+              s.pallet.palletNumber?.toUpperCase() === normalizedPallet ||
+              s.pallet.palletId?.toUpperCase() === normalizedPallet ||
+              s.pallet.palletNumber?.toUpperCase() === code.toUpperCase()
+            )) {
+              setPickingSlotCode(s.slotCode);
+              return;
+            }
+          }
+        }
+      }
+    }
+
     // 2. Check if it's a Finished Goods Barcode String (e.g. PA274/26...)
     const parsedFg = parseFinishedGoodsQrCode(code);
     const isFgQr = parsedFg.isValid ||
@@ -665,14 +747,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       setCartonEnd(parsedFg.cartonNumber);
       setCartonStart(Math.max(1, parsedFg.cartonNumber - 14));
       
-      const autoPalletNo = `PLT-${parsedFg.batchNo.replace(/[^A-Za-z0-9]/g, '-')}-${String(parsedFg.cartonNumber).padStart(3, '0')}`;
-      setPalletNumber(autoPalletNo);
+      // Auto-assign or keep KP-001 format
+      setPalletNumber(prev => {
+        if (!prev || prev.startsWith('PLT-') || prev === 'PLT-A-01' || prev === 'PLT-A-02') {
+          return getNextKpPalletNumber(racks);
+        }
+        return prev;
+      });
+
       setOperatorNote(`Verified QR FG ${parsedFg.productName} • Batch ${parsedFg.batchNo} (${parsedFg.cartonNumberFormatted})`);
 
       if (mode === 'PUTAWAY') {
         if (putawayOption === 'OPTION_1_RANGE') {
-          // Auto fill step 1 & advance to Step 2
+          // Auto fill step 1 & immediately direct to Step 2 (Range Box & Nomor Pallet KP-xxx)
           setPutawayStep(2);
+          setOption2Notice(`✓ Detail produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil terinput! Silakan periksa range box & nomor pallet format KP-001.`);
           return;
         } else {
           // OPTION 2: SCAN ALL QR CARTONS (MIN 2, MAX 15)
@@ -740,8 +829,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setParsedFgQr(genericFg);
         setCartonStart(1);
         setCartonEnd(Math.min(15, matchingProd.boxPerPallet || 15));
-        setPalletNumber(`PLT-${matchingProd.itemCode.slice(0, 7)}-${Date.now().toString().slice(-3)}`);
+        setPalletNumber(prev => prev.startsWith('KP-') ? prev : getNextKpPalletNumber(racks));
         setPutawayStep(2);
+        setOption2Notice(`✓ Produk ${matchingProd.itemName} terinput! Silakan tentukan range box & scan nomor pallet.`);
         return;
       } else {
         doLookup(matchingProd.itemCode);
@@ -749,24 +839,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
-    // 4. Check if Pallet Number (e.g. PLT-...)
-    if (/^PLT/i.test(code)) {
-      if (mode === 'PUTAWAY') {
-        setPalletNumber(code.toUpperCase());
-        return;
-      } else if (mode === 'PICKING') {
-        for (const r of Object.values(racks)) {
-          for (const s of Object.values(r.slots)) {
-            if (s.pallet && s.pallet.palletNumber?.toUpperCase() === code.toUpperCase()) {
-              setPickingSlotCode(s.slotCode);
-              return;
-            }
-          }
-        }
-      }
-    }
-
-    // 5. Default: Run general lookup
+    // 4. Default: Run general lookup
     doLookup(code);
   };
 
@@ -899,7 +972,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       productionTime: parsedFgQr.productionTimeFormatted || '14:35 WIB',
       expiryDate: expiryDateIso,
       rawQrCode: parsedFgQr.rawString || SAMPLE_FG_QR_CODE,
-      palletNumber: palletNumber.trim() || `PLT-${Date.now().toString().slice(-4)}`,
+      palletNumber: formatToKpPallet(palletNumber),
       rackingOption: putawayOption === 'OPTION_1_RANGE' ? 'RANGE' : 'MULTI_SCAN',
       icStatus: icStatus,
       notes: operatorNote.trim() ? `${operatorNote.trim()} | ${defaultNote}` : defaultNote
@@ -1043,7 +1116,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   putawayStep === 1
                     ? 'Target Scan Langkah 1: Arahkan Scanner Gun / Kamera ke Barcode QR Box FG'
                     : putawayStep === 2
-                    ? 'Langkah 2 Aktif: Masukkan Rentang Nomor Karton & ID Pallet pada Form di Bawah'
+                    ? 'Langkah 2: Input Rentang Box & Scan Barcode Pallet (KP-001) / Scan QR Rak'
                     : 'Target Scan Langkah 3: Arahkan Scanner Gun / Kamera ke QR Sticker Tiang Rak'
                 ) : (
                   putawayStep === 1
@@ -1071,7 +1144,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       ? putawayStep === 1
                         ? 'Tembak scanner gun ke QR Box FG (atau ketik & Enter)...'
                         : putawayStep === 2
-                        ? '(Langkah 2: Isi formulir nomor karton & ID pallet di bawah)...'
+                        ? 'Tembak scanner gun / kamera ke Barcode Pallet (format KP-001) atau QR Rak...'
                         : 'Tembak scanner gun ke QR Rak fisik (contoh: RAK-A-P1)...'
                       : putawayStep === 1
                       ? `Tembak scanner gun ke QR karton box ke-${scannedCartons.length + 1}...`
@@ -1197,7 +1270,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               </div>
               <div className="absolute top-2 left-3 bg-black/70 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-xs flex items-center gap-1.5 border border-white/10">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
-                <span>Kamera Aktif &bull; Posisikan QR di dalam kotak bidik</span>
+                <span>
+                  {mode === 'PUTAWAY' && putawayOption === 'OPTION_1_RANGE'
+                    ? putawayStep === 1
+                      ? 'Kamera Aktif • Bidik QR Code Box FG untuk Auto-Input Detail Produk'
+                      : putawayStep === 2
+                      ? 'Kamera Aktif • Bidik Barcode Nomor Pallet (KP-001) atau QR Rak'
+                      : 'Kamera Aktif • Bidik QR Sticker Tiang Rak Tujuan'
+                    : 'Kamera Aktif • Posisikan QR / Barcode di dalam kotak bidik'}
+                </span>
               </div>
               <div className="absolute bottom-2 inset-x-3 flex items-center justify-between text-white text-[10px] font-semibold bg-black/60 px-3 py-1 rounded-xl backdrop-blur-xs">
                 <span>Scanner JSQR Real-Time Aktif (Mendukung Android & iOS)</span>
@@ -1273,6 +1354,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       <span className="font-bold text-slate-900">{calculatedBoxCount} BOX (Maks 15)</span>
                     </div>
                     <div className="flex justify-between">
+                      <span className="text-slate-400">Tanggal Produksi:</span>
+                      <span className="font-mono font-bold text-slate-900">
+                        {parsedFgQr?.productionDateFormatted || '-'}
+                        {parsedFgQr?.productionTimeFormatted ? ` (${parsedFgQr.productionTimeFormatted})` : ''}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Best Before / Exp:</span>
+                      <span className="font-mono font-bold text-emerald-700">
+                        {parsedFgQr?.bestBeforeFormatted || '-'}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
                       <span className="text-slate-400">Lokasi Slot Rak:</span>
                       <span className="font-mono font-bold text-cyan-800">{targetSlot}</span>
                     </div>
@@ -1290,7 +1384,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         setPutawayStep(1);
                         setScannedCartons([]);
                         setOperatorNote('');
-                        setPalletNumber(`PLT-${Date.now().toString().slice(-4)}`);
+                        setPalletNumber(getNextKpPalletNumber(racks));
                       }}
                       className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow hover:bg-emerald-700 transition cursor-pointer"
                     >
@@ -1325,6 +1419,24 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                       Maks 15 Box
                     </span>
                   </div>
+
+                  {/* Universal Scan Notification Banner */}
+                  {option2Notice && (
+                    <div className="p-3.5 bg-emerald-50 border-2 border-emerald-400 rounded-2xl flex items-center justify-between text-xs text-emerald-950 font-bold shadow-xs animate-in fade-in duration-150">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{option2Notice}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setOption2Notice(null)}
+                        className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
+                        title="Tutup pesan"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
 
                   {/* ============================================================== */}
                   {/* OPSI 1: SCAN 1 QR + INPUT RANGE CARTON + NO PALLET + SCAN RAK */}
@@ -1405,6 +1517,22 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             </button>
                           </div>
 
+                          {!parsedFgQr && (
+                            <div className="p-8 text-center bg-slate-50/80 rounded-2xl border-2 border-dashed border-slate-300 space-y-3">
+                              <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-100 text-cyan-700 flex items-center justify-center shadow-xs">
+                                <Scan className="w-7 h-7" />
+                              </div>
+                              <div>
+                                <h5 className="font-black text-slate-900 text-base">
+                                  Menunggu Pembacaan QR Code Box Produk FG
+                                </h5>
+                                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
+                                  Arahkan <strong>Scanner Barcode Gun</strong> ke QR label box atau aktifkan <strong>Kamera HP</strong> di atas. Setelah barcode terbaca, detail produk otomatis terisi dan langsung diarahkan ke Langkah 2 (Input Range Box & Nomor Pallet KP-001).
+                                </p>
+                              </div>
+                            </div>
+                          )}
+
                           {parsedFgQr && (
                             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
                               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
@@ -1466,10 +1594,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             <div>
                               <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
                                 <Hash className="w-4 h-4 text-cyan-600" />
-                                Langkah 2: Input Rentang Nomor Karton, Nomor Pallet & Catatan
+                                Langkah 2: Detail Produk, Rentang Nomor Karton & Nomor Pallet (KP-001)
                               </h4>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                Batasan maksimal adalah 15 box dalam 1 pallet. Berikan note untuk memastikan operator mengetahui range sudah benar.
+                                Detail produk terisi otomatis dari scan QR. Tentukan rentang box (maks 15 box) dan scan / input nomor pallet (format KP-001 s/d seterusnya).
                               </p>
                             </div>
                             <button
@@ -1478,45 +1606,162 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               className="text-xs font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
                             >
                               <ArrowLeft className="w-3.5 h-3.5" />
-                              <span>Kembali</span>
+                              <span>Scan Ulang Box</span>
                             </button>
                           </div>
 
-                          {/* Range Inputs */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200">
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Nomor Karton Awal
-                              </label>
-                              <div className="flex items-center gap-2">
-                                <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
-                                  D
+                          {/* Card Detail Produk Terinput (Hasil Scan QR Code Inbound) */}
+                          {parsedFgQr && (
+                            <div className="p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 rounded-2xl border-2 border-emerald-300 shadow-xs space-y-3">
+                              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2 flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="bg-emerald-600 text-white text-[11px] font-mono font-black px-2.5 py-0.5 rounded-lg shadow-2xs">
+                                    {parsedFgQr.packingLineName}
+                                  </span>
+                                  <span className="text-xs font-black text-slate-800">
+                                    Batch: {parsedFgQr.batchNo} ({parsedFgQr.batchYear})
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-[11px] font-bold bg-white text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                    Detail Produk Terinput
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setPutawayStep(1)}
+                                    className="text-[11px] text-slate-500 hover:text-emerald-700 underline font-semibold cursor-pointer"
+                                  >
+                                    Ubah / Scan Ulang
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
+                                    Nama Produk Terinput:
+                                  </span>
+                                  <h4 className="font-black text-slate-900 text-base sm:text-lg leading-tight">
+                                    {parsedFgQr.productName}
+                                  </h4>
+                                </div>
+                                <span className="text-xs font-mono font-bold text-cyan-800 bg-white px-2.5 py-1 rounded-lg border border-cyan-200 shrink-0">
+                                  PIN #{parsedFgQr.productPin}
                                 </span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  value={cartonStart}
-                                  onChange={(e) => setCartonStart(parseInt(e.target.value, 10) || 1)}
-                                  className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
-                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
+                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
+                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Karton Terbaca Awal</span>
+                                  <span className="font-mono font-black text-emerald-900 text-sm">{parsedFgQr.cartonNumberFormatted}</span>
+                                </div>
+                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
+                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Waktu Produksi</span>
+                                  <span className="font-bold text-slate-800">{parsedFgQr.productionTimeFormatted}</span>
+                                </div>
+                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
+                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Tgl Produksi</span>
+                                  <span className="font-bold text-slate-800">{parsedFgQr.productionDateFormatted}</span>
+                                </div>
+                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
+                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Best Before</span>
+                                  <span className="font-bold text-slate-800">{parsedFgQr.bestBeforeFormatted}</span>
+                                </div>
                               </div>
                             </div>
+                          )}
 
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Nomor Karton Akhir
-                              </label>
-                              <div className="flex items-center gap-2">
-                                <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
-                                  D
-                                </span>
-                                <input
-                                  type="number"
-                                  min={1}
-                                  value={cartonEnd}
-                                  onChange={(e) => setCartonEnd(parseInt(e.target.value, 10) || 1)}
-                                  className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
-                                />
+                          {/* Range Inputs */}
+                          <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <span className="text-xs font-black uppercase tracking-wider text-slate-800">
+                                Rentang Nomor Karton Box:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const endVal = parsedFgQr?.cartonNumber || cartonEnd || 86;
+                                  setCartonEnd(endVal);
+                                  setCartonStart(Math.max(1, endVal - 14));
+                                }}
+                                className="text-[11px] font-bold text-cyan-700 hover:text-cyan-800 bg-cyan-50 hover:bg-cyan-100 px-2.5 py-1 rounded-lg border border-cyan-200 transition cursor-pointer"
+                              >
+                                Set 15 Box Maksimal (Penuh)
+                              </button>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
+                                  Nomor Karton Awal
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
+                                    D
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={cartonStart}
+                                    onChange={(e) => setCartonStart(parseInt(e.target.value, 10) || 1)}
+                                    className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
+                                  />
+                                  <div className="flex flex-col gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setCartonStart(prev => Math.max(1, prev - 1))}
+                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
+                                      title="Kurangi 1"
+                                    >
+                                      -1
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCartonStart(prev => prev + 1)}
+                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
+                                      title="Tambah 1"
+                                    >
+                                      +1
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
+                                  Nomor Karton Akhir
+                                </label>
+                                <div className="flex items-center gap-2">
+                                  <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
+                                    D
+                                  </span>
+                                  <input
+                                    type="number"
+                                    min={1}
+                                    value={cartonEnd}
+                                    onChange={(e) => setCartonEnd(parseInt(e.target.value, 10) || 1)}
+                                    className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
+                                  />
+                                  <div className="flex flex-col gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => setCartonEnd(prev => Math.max(1, prev - 1))}
+                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
+                                      title="Kurangi 1"
+                                    >
+                                      -1
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCartonEnd(prev => prev + 1)}
+                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
+                                      title="Tambah 1"
+                                    >
+                                      +1
+                                    </button>
+                                  </div>
+                                </div>
                               </div>
                             </div>
                           </div>
@@ -1558,33 +1803,95 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             )}
                           </div>
 
-                          {/* Pallet Number & Operator Note Input */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Nomor Pallet (ID Pallet)
-                              </label>
-                              <input
-                                type="text"
-                                value={palletNumber}
-                                onChange={(e) => setPalletNumber(e.target.value.toUpperCase())}
-                                placeholder="Contoh: PLT-A-01"
-                                className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono font-black text-base sm:text-lg text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 uppercase placeholder:font-normal placeholder:text-slate-400"
-                              />
+                          {/* Pallet Number with Scanner & Camera Support (Format KP-001 s/d seterusnya) */}
+                          <div className="p-4 sm:p-5 bg-cyan-50/50 rounded-2xl border-2 border-cyan-200 space-y-3">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div>
+                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                                  <Scan className="w-4 h-4 text-cyan-600" />
+                                  Nomor Pallet (Format Standar: KP-001 s/d seterusnya)
+                                </label>
+                                <span className="text-[11px] text-slate-500">
+                                  Bisa dibaca langsung dengan <strong>Scanner Barcode Gun</strong> atau <strong>Kamera</strong> di atas, atau otomatis terisi.
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = getNextKpPalletNumber(racks);
+                                    setPalletNumber(next);
+                                    soundManager.playScanSuccess();
+                                  }}
+                                  className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 text-cyan-800 border border-cyan-300 rounded-lg shadow-2xs transition cursor-pointer"
+                                >
+                                  Otomatis: {getNextKpPalletNumber(racks)}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={handleIncrementPalletNumber}
+                                  className="px-2.5 py-1 text-[11px] font-bold bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg shadow-2xs transition cursor-pointer"
+                                  title="Tambah nomor urut pallet (+1)"
+                                >
+                                  +1 Pallet
+                                </button>
+                              </div>
                             </div>
 
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Catatan / Note Operator (Pemeriksaan Range)
-                              </label>
-                              <input
-                                type="text"
-                                value={operatorNote}
-                                onChange={(e) => setOperatorNote(e.target.value)}
-                                placeholder="Contoh: Range fisik verified D072-D086, kondisi karton baik"
-                                className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl text-sm sm:text-base font-semibold text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 placeholder:text-slate-400"
-                              />
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <input
+                                  type="text"
+                                  value={palletNumber}
+                                  onChange={(e) => setPalletNumber(e.target.value.toUpperCase())}
+                                  onBlur={(e) => setPalletNumber(formatToKpPallet(e.target.value))}
+                                  placeholder="Contoh: KP-001"
+                                  className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-cyan-400 rounded-xl font-mono font-black text-lg sm:text-xl text-slate-900 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 uppercase placeholder:font-normal placeholder:text-slate-400 shadow-2xs"
+                                />
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs font-bold text-cyan-700 bg-cyan-100 px-2 py-1 rounded-md">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Format KP</span>
+                                </div>
+                              </div>
                             </div>
+
+                            {/* Scanner / Camera Hint Banner */}
+                            <div className="p-2.5 bg-white/90 rounded-xl border border-cyan-200 flex items-center justify-between text-xs text-cyan-950 flex-wrap gap-2">
+                              <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                                <span className="font-semibold">
+                                  Scanner & Kamera Siap Membaca: Tembak barcode nomor pallet (misal label <strong>KP-001</strong>) untuk auto-isi.
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (!cameraActive) {
+                                    startCamera();
+                                  } else {
+                                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                                  }
+                                }}
+                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+                              >
+                                <Camera className="w-3.5 h-3.5" />
+                                <span>{cameraActive ? 'Kamera Aktif' : 'Aktifkan Kamera'}</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Operator Note Input */}
+                          <div>
+                            <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
+                              Catatan / Note Operator (Pemeriksaan Range & Kondisi)
+                            </label>
+                            <input
+                              type="text"
+                              value={operatorNote}
+                              onChange={(e) => setOperatorNote(e.target.value)}
+                              placeholder="Contoh: Range fisik verified D072-D086, kondisi karton baik"
+                              className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl text-sm sm:text-base font-semibold text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 placeholder:text-slate-400"
+                            />
                           </div>
 
                           {/* Pilihan Status IC (OK, HOLD, BO) - Default: OK */}
@@ -1771,6 +2078,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               <div>
                                 <span className="text-slate-400 block text-[10px]">RENTANG KARTON</span>
                                 <span className="font-bold">D{String(cartonStart).padStart(3, '0')} s/d D{String(cartonEnd).padStart(3, '0')} ({calculatedBoxCount} Box)</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">TANGGAL PRODUKSI</span>
+                                <span className="font-bold font-mono text-slate-900">
+                                  {parsedFgQr?.productionDateFormatted || '-'}
+                                  {parsedFgQr?.productionTimeFormatted ? ` • ${parsedFgQr.productionTimeFormatted}` : ''}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">BEST BEFORE / EXP</span>
+                                <span className="font-bold font-mono text-emerald-800">
+                                  {parsedFgQr?.bestBeforeFormatted || '-'}
+                                </span>
                               </div>
                               <div>
                                 <span className="text-slate-400 block text-[10px]">LOKASI TUJUAN</span>
@@ -2156,6 +2476,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                                 <span className="font-bold">{scannedCartons.length} Box (Min 2, Maks 15)</span>
                               </div>
                               <div>
+                                <span className="text-slate-400 block text-[10px]">TANGGAL PRODUKSI</span>
+                                <span className="font-bold font-mono text-slate-900">
+                                  {parsedFgQr?.productionDateFormatted || '-'}
+                                  {parsedFgQr?.productionTimeFormatted ? ` • ${parsedFgQr.productionTimeFormatted}` : ''}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block text-[10px]">BEST BEFORE / EXP</span>
+                                <span className="font-bold font-mono text-emerald-800">
+                                  {parsedFgQr?.bestBeforeFormatted || '-'}
+                                </span>
+                              </div>
+                              <div>
                                 <span className="text-slate-400 block text-[10px]">LOKASI TUJUAN</span>
                                 <span className="font-mono font-black text-emerald-800">{targetSlot}</span>
                               </div>
@@ -2252,12 +2585,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                           <span className="font-mono font-bold text-emerald-700">{lookupResult.parsedQr.cartonNumberFormatted}</span>
                         </div>
                         <div className="p-2 bg-white rounded-lg border border-cyan-100">
-                          <span className="text-slate-400 block text-[10px]">WAKTU PROSES</span>
-                          <span className="font-semibold text-slate-800">{lookupResult.parsedQr.productionTimeFormatted}</span>
+                          <span className="text-slate-400 block text-[10px]">TGL PRODUKSI</span>
+                          <span className="font-semibold text-slate-800">
+                            {lookupResult.parsedQr.productionDateFormatted}
+                            {lookupResult.parsedQr.productionTimeFormatted ? ` (${lookupResult.parsedQr.productionTimeFormatted})` : ''}
+                          </span>
                         </div>
                         <div className="p-2 bg-white rounded-lg border border-cyan-100">
                           <span className="text-slate-400 block text-[10px]">BEST BEFORE</span>
-                          <span className="font-semibold text-slate-800">{lookupResult.parsedQr.bestBeforeFormatted}</span>
+                          <span className="font-semibold text-emerald-700">{lookupResult.parsedQr.bestBeforeFormatted}</span>
                         </div>
                       </div>
 

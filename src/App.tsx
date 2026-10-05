@@ -785,8 +785,8 @@ export default function App() {
     const matchedKey = findMatchingSlotKey(rackObj.slots, slotCode) || parsed.canonicalSlotCode;
 
     const generatedPalletId = palletData.palletNumber
-      ? (palletData.palletNumber.toUpperCase().startsWith('PLT') ? palletData.palletNumber.toUpperCase() : `PLT-${palletData.palletNumber.toUpperCase()}`)
-      : `PLT-${matchedKey}-${palletData.itemCode}-${Date.now().toString().slice(-4)}`;
+      ? palletData.palletNumber.trim().toUpperCase()
+      : `KP-${Date.now().toString().slice(-4)}`;
 
     const currentSlot = rackObj.slots[matchedKey];
     if (!currentSlot) return;

@@ -87,19 +87,47 @@ const KNOWN_PIN_PRODUCTS: Record<string, { name: string; type: string; weightKg:
 };
 
 export function formatDdMmYyyy(rawDateStr: string): string {
-  if (!rawDateStr || rawDateStr.length !== 8) return rawDateStr || '';
-  const day = rawDateStr.slice(0, 2);
-  const month = rawDateStr.slice(2, 4);
-  const year = rawDateStr.slice(4, 8);
-  return `${day}-${month}-${year}`;
+  if (!rawDateStr) return '';
+  const clean = rawDateStr.trim();
+  // If already DD-MM-YYYY or DD/MM/YYYY
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}/.test(clean)) {
+    return clean.replace(/\//g, '-');
+  }
+  // If YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
+    const parts = clean.split('-');
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  // If raw 8-digit DDMMYYYY (e.g. 30062026)
+  if (clean.length === 8 && /^\d{8}$/.test(clean)) {
+    const day = clean.slice(0, 2);
+    const month = clean.slice(2, 4);
+    const year = clean.slice(4, 8);
+    return `${day}-${month}-${year}`;
+  }
+  return clean;
 }
 
 export function formatIsoDate(rawDateStr: string): string {
-  if (!rawDateStr || rawDateStr.length !== 8) return '2026-06-30';
-  const day = rawDateStr.slice(0, 2);
-  const month = rawDateStr.slice(2, 4);
-  const year = rawDateStr.slice(4, 8);
-  return `${year}-${month}-${day}`;
+  if (!rawDateStr) return '2026-06-30';
+  const clean = rawDateStr.trim();
+  // If already YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}/.test(clean)) {
+    return clean.slice(0, 10);
+  }
+  // If DD-MM-YYYY or DD/MM/YYYY
+  if (/^\d{2}[-/]\d{2}[-/]\d{4}/.test(clean)) {
+    const parts = clean.split(/[-/]/);
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  // If raw 8-digit DDMMYYYY
+  if (clean.length === 8 && /^\d{8}$/.test(clean)) {
+    const day = clean.slice(0, 2);
+    const month = clean.slice(2, 4);
+    const year = clean.slice(4, 8);
+    return `${year}-${month}-${day}`;
+  }
+  return '2026-06-30';
 }
 
 export function parseFinishedGoodsQrCode(rawInput: string): ParsedFinishedGoodsQr {
