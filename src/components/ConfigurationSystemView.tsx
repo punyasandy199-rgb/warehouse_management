@@ -36,7 +36,10 @@ import {
   Shield,
   HelpCircle,
   KeyRound,
-  FileCode
+  FileCode,
+  Camera,
+  CameraOff,
+  Scan
 } from 'lucide-react';
 import { UserAccount, UserRole, ActivityLog, PasswordChangeLog } from '../types';
 
@@ -70,6 +73,8 @@ interface ConfigurationSystemViewProps {
   logs: ActivityLog[];
   onForceSyncCloud?: () => Promise<boolean>;
   cloudSyncStatus?: 'connected' | 'syncing' | 'offline' | 'error';
+  isCameraScannerEnabled?: boolean;
+  onToggleCameraScanner?: (enabled: boolean) => void;
 }
 
 export const ConfigurationSystemView: React.FC<ConfigurationSystemViewProps> = ({
@@ -83,9 +88,11 @@ export const ConfigurationSystemView: React.FC<ConfigurationSystemViewProps> = (
   onOpenClearDataModal,
   logs,
   onForceSyncCloud,
-  cloudSyncStatus = 'connected'
+  cloudSyncStatus = 'connected',
+  isCameraScannerEnabled = true,
+  onToggleCameraScanner
 }) => {
-  const [activeConfigTab, setActiveConfigTab] = useState<'accounts' | 'roles' | 'cloud' | 'logs'>('accounts');
+  const [activeConfigTab, setActiveConfigTab] = useState<'accounts' | 'roles' | 'scanner' | 'cloud' | 'logs'>('accounts');
 
   const isSuperAdminOrSpv = currentUser.role === 'superadmin' || currentUser.role === 'supervisor';
   const isAdmin = currentUser.role === 'admin';
@@ -521,6 +528,26 @@ export const ConfigurationSystemView: React.FC<ConfigurationSystemViewProps> = (
         >
           <Cloud className="w-4 h-4" />
           <span>Konfigurasi Cloud (Firebase & GitHub)</span>
+        </button>
+
+        {/* Tab Khusus Super Admin: Kontrol Kamera vs Scanner Gun */}
+        <button
+          onClick={() => setActiveConfigTab('scanner')}
+          className={`py-2 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 transition cursor-pointer ${
+            activeConfigTab === 'scanner'
+              ? 'bg-purple-700 text-white shadow-xs ring-2 ring-purple-400/30'
+              : 'text-purple-700 hover:text-purple-900 hover:bg-purple-50'
+          }`}
+        >
+          <Camera className="w-4 h-4" />
+          <span>Fitur Kamera & Scanner (Super Admin)</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-wider ${
+            isCameraScannerEnabled 
+              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
+              : 'bg-amber-100 text-amber-900 border border-amber-300'
+          }`}>
+            {isCameraScannerEnabled ? 'Kamera ON' : 'Scanner Gun (OFF)'}
+          </span>
         </button>
 
         <button
@@ -991,6 +1018,158 @@ export const ConfigurationSystemView: React.FC<ConfigurationSystemViewProps> = (
             </div>
           </div>
 
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* TAB KHUSUS SUPER ADMIN: KONTROL KAMERA VS HARDWARE SCANNER GUN            */}
+      {/* ========================================================================= */}
+      {activeConfigTab === 'scanner' && (
+        <div className="space-y-5">
+          {/* Header Card */}
+          <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 rounded-3xl p-6 text-white shadow-xl border border-purple-500/20 relative overflow-hidden">
+            <div className="relative z-10 space-y-3">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-black uppercase tracking-wider bg-purple-500/30 text-purple-200 border border-purple-400/30 px-2.5 py-0.5 rounded-full">
+                  Fitur Khusus Super Admin
+                </span>
+                <span className="text-xs text-purple-300 font-mono">
+                  Pengaturan Perangkat & Akses Sensor
+                </span>
+              </div>
+              <div>
+                <h3 className="text-xl sm:text-2xl font-black tracking-tight text-white">
+                  Kontrol Fitur Kamera vs Hardware Scanner Gun
+                </h3>
+                <p className="text-xs sm:text-sm text-purple-200/90 max-w-2xl mt-1 leading-relaxed">
+                  Tentukan apakah seluruh pengguna (semua user) diperbolehkan menggunakan akses <strong>Kamera HP / Webcam</strong> untuk membaca QR Code produk, pallet, dan rak, atau <strong>wajib menggunakan Scanner Gun fisik</strong>.
+                </p>
+              </div>
+
+              {/* Toggle Switch Banner */}
+              <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20">
+                <div className="flex items-center gap-3.5">
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${
+                    isCameraScannerEnabled 
+                      ? 'bg-emerald-500/30 text-emerald-300 border-emerald-400/40 shadow-emerald-500/20 shadow-lg' 
+                      : 'bg-amber-500/30 text-amber-300 border-amber-400/40 shadow-amber-500/20 shadow-lg'
+                  }`}>
+                    {isCameraScannerEnabled ? (
+                      <Camera className="w-6 h-6 stroke-[2.5]" />
+                    ) : (
+                      <Scan className="w-6 h-6 stroke-[2.5]" />
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-[11px] font-extrabold uppercase tracking-wider text-purple-200 block">
+                      Status Akses Kamera Global Saat Ini:
+                    </span>
+                    <span className={`text-lg sm:text-xl font-black font-mono block ${
+                      isCameraScannerEnabled ? 'text-emerald-300' : 'text-amber-300'
+                    }`}>
+                      {isCameraScannerEnabled ? 'KAMERA AKTIF (ON) DI SEMUA USER' : 'KAMERA MATI (OFF) - HANYA SCANNER GUN'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => onToggleCameraScanner?.(false)}
+                    className={`px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer flex items-center gap-1.5 border ${
+                      !isCameraScannerEnabled
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-black'
+                        : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+                    }`}
+                  >
+                    <Scan className="w-4 h-4" />
+                    <span>POSISI "OFF" (Scanner Gun Saja)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => onToggleCameraScanner?.(true)}
+                    className={`px-4 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer flex items-center gap-1.5 border ${
+                      isCameraScannerEnabled
+                        ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-md font-black'
+                        : 'bg-white/10 text-white border-white/20 hover:bg-white/20'
+                    }`}
+                  >
+                    <Camera className="w-4 h-4" />
+                    <span>POSISI "ON" (Akses Kamera Aktif)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Ambient bubble decoration */}
+            <div className="absolute -right-10 -bottom-10 w-60 h-60 bg-purple-500/20 rounded-full blur-3xl pointer-events-none" />
+          </div>
+
+          {/* Operational Comparison Details */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Mode ON Card */}
+            <div className={`p-5 rounded-2xl border-2 transition ${
+              isCameraScannerEnabled 
+                ? 'bg-emerald-50/70 border-emerald-400 ring-2 ring-emerald-300/40 shadow-sm' 
+                : 'bg-white border-slate-200 opacity-60'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <Camera className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">Mode Kamera: ON</h4>
+                    <span className="text-[10px] text-emerald-800 font-bold">Kamera Terbuka untuk Seluruh Pengguna</span>
+                  </div>
+                </div>
+                {isCameraScannerEnabled && (
+                  <span className="bg-emerald-200 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                    SEDANG DIGUNAKAN
+                  </span>
+                )}
+              </div>
+              <ul className="text-xs text-slate-600 space-y-2 list-disc pl-4">
+                <li>Operator dan Admin dapat menggunakan <strong>Kamera Smartphone / Webcam</strong> untuk membaca QR Code produk, pallet, dan rak.</li>
+                <li>Tombol <strong>"Scan QR Pallet"</strong> dan <strong>"Scan QR Rak"</strong> aktif dan siap menyalakan kamera.</li>
+                <li>Kamera akan <strong>otomatis langsung OFF</strong> segera setelah barcode terbaca untuk menghemat baterai & memori.</li>
+                <li>Tetap mendukung hardware Scanner Gun secara bersamaan (hybrid).</li>
+              </ul>
+            </div>
+
+            {/* Mode OFF Card */}
+            <div className={`p-5 rounded-2xl border-2 transition ${
+              !isCameraScannerEnabled 
+                ? 'bg-amber-50/70 border-amber-400 ring-2 ring-amber-300/40 shadow-sm' 
+                : 'bg-white border-slate-200 opacity-60'
+            }`}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center">
+                    <Scan className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm">Mode Kamera: OFF</h4>
+                    <span className="text-[10px] text-amber-900 font-bold">Wajib Menggunakan Hardware Scanner Gun</span>
+                  </div>
+                </div>
+                {!isCameraScannerEnabled && (
+                  <span className="bg-amber-200 text-amber-950 text-[10px] font-black px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-600 animate-pulse" />
+                    SEDANG DIGUNAKAN
+                  </span>
+                )}
+              </div>
+              <ul className="text-xs text-slate-600 space-y-2 list-disc pl-4">
+                <li>Akses kamera <strong>dinonaktifkan sepenuhnya</strong> untuk semua pengguna (kamera tidak akan menyala).</li>
+                <li>Seluruh proses input QR Code produk, nomor pallet, dan slot rak <strong>wajib menggunakan Scanner Gun fisik</strong> (USB/Bluetooth/Wireless).</li>
+                <li>Mencegah penyalahgunaan kamera HP di area gudang yang memiliki regulasi privasi/keamanan ketat.</li>
+                <li>Tampilan UI modal pemindai beralih ke layout bersih khusus hardware Scanner Gun.</li>
+              </ul>
+            </div>
+          </div>
         </div>
       )}
 

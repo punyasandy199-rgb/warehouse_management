@@ -134,6 +134,33 @@ export interface PalletPositionSlot {
   blockedBy?: string;
 }
 
+export interface InboundNotification {
+  id: string;
+  type: 'INBOUND_SUCCESS';
+  palletNumber: string;
+  itemName: string;
+  itemCode: string;
+  batchNo: string;
+  quantityBox: number;
+  cartonRangeText: string;
+  productionDate: string;
+  productionTime: string;
+  expiryDate: string;
+  slotCode: string;
+  operatorName: string;
+  icStatus: ICStatus;
+  timestamp: string;
+  createdAt: number;
+  notes?: string;
+  read?: boolean;
+}
+
+export interface SystemConfig {
+  isCameraScannerEnabled?: boolean;
+  stagingAreas?: any[];
+  rolePermissions?: any;
+}
+
 export interface RackSlot {
   slotCode: string; // e.g. "A1a", "B3d"
   level: number;    // 1, 2, 3, 4, ...

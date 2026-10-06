@@ -14,7 +14,8 @@ import {
   EmployeePIC,
   PalletData,
   StagingAreaInfo,
-  ICStatus
+  ICStatus,
+  InboundNotification
 } from './types';
 import { 
   Monitor, 
@@ -56,8 +57,10 @@ import { RackQrPrintModal } from './components/RackQrPrintModal';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { ClearDataModal } from './components/ClearDataModal';
+import { InboundSummaryModal } from './components/InboundSummaryModal';
 import { SOPFlowchartView, SOPTab } from './components/SOPFlowchartView';
 import { parseSlotCode, findMatchingSlotKey } from './utils/barcode';
+import { soundManager } from './utils/audio';
 import { 
   testConnection,
   subscribeToRacks,
@@ -83,7 +86,9 @@ import {
   seedInitialCloudDataIfEmpty,
   saveOutboundToCloud,
   saveSystemConfigToCloud,
-  subscribeToSystemConfig
+  subscribeToSystemConfig,
+  subscribeToInboundNotifications,
+  sendInboundNotificationToCloud
 } from './firebase';
 
 const STORAGE_KEY_RACKS = 'sikutang_racks_v1';
@@ -268,6 +273,81 @@ export default function App() {
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isClearDataModalOpen, setIsClearDataModalOpen] = useState(false);
   const [simulationResetCounter, setSimulationResetCounter] = useState(0);
+
+  // Fitur Khusus Super Admin: ON / OFF Fitur Kamera Digunakan di Semua User
+  const [isCameraGlobalEnabled, setIsCameraGlobalEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('sikutang_camera_global_enabled');
+      if (saved !== null) return JSON.parse(saved);
+    } catch {}
+    return true;
+  });
+
+  // Inbound Notifications State (Cross-Computer & Cross-Session)
+  const [inboundNotifications, setInboundNotifications] = useState<InboundNotification[]>(() => {
+    try {
+      const saved = localStorage.getItem('sikutang_inbound_notifications_v1');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return [];
+  });
+
+  // Selected Notification for InboundSummaryModal popup
+  const [selectedSummaryNotification, setSelectedSummaryNotification] = useState<InboundNotification | null>(null);
+
+  // Real-time Incoming Inbound Toast Alert (for online Admin)
+  const [incomingInboundToast, setIncomingInboundToast] = useState<InboundNotification | null>(null);
+
+  const unreadInboundCount = inboundNotifications.filter(n => !n.read).length;
+
+  const handleToggleCameraScanner = (enabled: boolean) => {
+    setIsCameraGlobalEnabled(enabled);
+    try {
+      localStorage.setItem('sikutang_camera_global_enabled', JSON.stringify(enabled));
+    } catch {}
+    // Broadcast locally to other open tabs
+    try {
+      const bc = new BroadcastChannel('sikutang_system_config');
+      bc.postMessage({ type: 'CAMERA_CONFIG_CHANGE', isCameraScannerEnabled: enabled });
+      bc.close();
+    } catch {}
+    // Save to Firebase Cloud so other computers update immediately
+    saveSystemConfigToCloud({ isCameraScannerEnabled: enabled });
+    addLog(
+      'CONFIG',
+      `Super Admin mengubah fitur kamera: ${enabled ? 'ON (Semua User dapat memakai Kamera)' : 'OFF (Semua User memakai Scanner Gun Fisik)'}`
+    );
+  };
+
+  const handleInboundNotification = (notif: InboundNotification) => {
+    setInboundNotifications(prev => {
+      const next = [notif, ...prev.filter(n => n.id !== notif.id)];
+      try {
+        localStorage.setItem('sikutang_inbound_notifications_v1', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    // Send to Firebase Cloud for other computers
+    sendInboundNotificationToCloud(notif);
+
+    // Broadcast to other tabs on same computer
+    try {
+      const bc = new BroadcastChannel('sikutang_inbound_channel');
+      bc.postMessage({ type: 'NEW_INBOUND', notification: notif });
+      bc.close();
+    } catch {}
+  };
+
+  const handleMarkAllInboundAsRead = () => {
+    setInboundNotifications(prev => {
+      const updated = prev.map(n => ({ ...n, read: true }));
+      try {
+        localStorage.setItem('sikutang_inbound_notifications_v1', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
 
   // Platform View Mode: 'web' (Desktop) vs 'android' (Handheld WMS Scanner Smartphone)
   const [deviceViewMode, setDeviceViewMode] = useState<'web' | 'android'>(() => {
@@ -502,6 +582,46 @@ export default function App() {
     let unsubEmployees: (() => void) | undefined;
     let unsubLogs: (() => void) | undefined;
     let unsubConfig: (() => void) | undefined;
+    let unsubInbound: (() => void) | undefined;
+
+    // Cross-tab broadcast channel for local instant synchronization
+    let bcInbound: BroadcastChannel | null = null;
+    let bcConfig: BroadcastChannel | null = null;
+    try {
+      bcInbound = new BroadcastChannel('sikutang_inbound_channel');
+      bcInbound.onmessage = (event) => {
+        if (event.data?.type === 'NEW_INBOUND' && event.data.notification) {
+          const notif = event.data.notification as InboundNotification;
+          setInboundNotifications(prev => {
+            if (prev.some(n => n.id === notif.id)) return prev;
+            const updated = [notif, ...prev];
+            try { localStorage.setItem('sikutang_inbound_notifications_v1', JSON.stringify(updated)); } catch {}
+            return updated;
+          });
+          if (currentUser.role === 'admin' || currentUser.role === 'superadmin' || currentUser.role === 'supervisor') {
+            setIncomingInboundToast(notif);
+            soundManager.playScanSuccess();
+          }
+        }
+      };
+
+      bcConfig = new BroadcastChannel('sikutang_system_config');
+      bcConfig.onmessage = (event) => {
+        if (event.data?.type === 'CAMERA_CONFIG_CHANGE') {
+          setIsCameraGlobalEnabled(!!event.data.isCameraScannerEnabled);
+        }
+      };
+    } catch {}
+
+    const handleStorageEvent = (e: StorageEvent) => {
+      if (e.key === 'sikutang_camera_global_enabled' && e.newValue !== null) {
+        try { setIsCameraGlobalEnabled(JSON.parse(e.newValue)); } catch {}
+      }
+      if (e.key === 'sikutang_inbound_notifications_v1' && e.newValue) {
+        try { setInboundNotifications(JSON.parse(e.newValue)); } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageEvent);
 
     async function initCloudSync() {
       setCloudSyncStatus('syncing');
@@ -539,7 +659,7 @@ export default function App() {
           setCloudSyncStatus('connected');
         });
 
-        // Real-time listener: System Config (Master Lokasi Staging, Lorong & Dock)
+        // Real-time listener: System Config (Master Lokasi Staging, Lorong, Dock & Camera Toggle)
         unsubConfig = subscribeToSystemConfig((incomingConfig) => {
           if (incomingConfig?.stagingAreas && Array.isArray(incomingConfig.stagingAreas)) {
             setStagingAreas(prev => {
@@ -553,7 +673,44 @@ export default function App() {
               localStorage.setItem('sikutang_role_permissions_v2', JSON.stringify(incomingConfig.rolePermissions));
             } catch {}
           }
+          if (incomingConfig?.isCameraScannerEnabled !== undefined) {
+            setIsCameraGlobalEnabled(!!incomingConfig.isCameraScannerEnabled);
+            try {
+              localStorage.setItem('sikutang_camera_global_enabled', JSON.stringify(!!incomingConfig.isCameraScannerEnabled));
+            } catch {}
+          }
           setCloudSyncStatus('connected');
+        });
+
+        // Real-time listener: Inbound Notifications (Sinkronisasi Antar Komputer & Sesi)
+        unsubInbound = subscribeToInboundNotifications((incomingInbounds) => {
+          if (incomingInbounds && incomingInbounds.length > 0) {
+            setInboundNotifications(prev => {
+              const map = new Map<string, InboundNotification>();
+              incomingInbounds.forEach(n => map.set(n.id, n));
+              prev.forEach(n => {
+                if (!map.has(n.id)) map.set(n.id, n);
+              });
+              const merged = Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+              try {
+                localStorage.setItem('sikutang_inbound_notifications_v1', JSON.stringify(merged));
+              } catch {}
+              return merged;
+            });
+
+            // Notifikasi Real-Time Pop Up untuk Admin / Super Admin yang sedang online
+            const newest = incomingInbounds[0];
+            if (newest && Date.now() - (newest.createdAt || 0) < 120000) {
+              const sessionKey = `seen_toast_${newest.id}`;
+              if (!sessionStorage.getItem(sessionKey)) {
+                sessionStorage.setItem(sessionKey, '1');
+                if (currentUser.role === 'admin' || currentUser.role === 'superadmin' || currentUser.role === 'supervisor') {
+                  setIncomingInboundToast(newest);
+                  soundManager.playScanSuccess();
+                }
+              }
+            }
+          }
         });
 
         // Check if database needs first-time bootstrap seed or sync latest from cloud
@@ -646,6 +803,10 @@ export default function App() {
       unsubEmployees?.();
       unsubLogs?.();
       unsubConfig?.();
+      unsubInbound?.();
+      bcInbound?.close();
+      bcConfig?.close();
+      window.removeEventListener('storage', handleStorageEvent);
     };
   }, []);
 
@@ -1403,6 +1564,12 @@ export default function App() {
         cloudSyncStatus={cloudSyncStatus}
         onForceSyncCloud={handleForceSyncToCloud}
         onPullFromCloud={handlePullFromCloud}
+        inboundNotifications={inboundNotifications}
+        unreadInboundCount={unreadInboundCount}
+        onOpenInboundSummary={(notif) => setSelectedSummaryNotification(notif)}
+        onMarkAllInboundAsRead={handleMarkAllInboundAsRead}
+        isCameraScannerEnabled={isCameraGlobalEnabled}
+        onToggleCameraScanner={handleToggleCameraScanner}
       />
 
       {/* Main Container */}
@@ -1536,6 +1703,8 @@ export default function App() {
             logs={logs}
             cloudSyncStatus={cloudSyncStatus}
             onForceSyncCloud={handleForceSyncToCloud}
+            isCameraScannerEnabled={isCameraGlobalEnabled}
+            onToggleCameraScanner={handleToggleCameraScanner}
           />
         )}
 
@@ -1664,6 +1833,8 @@ export default function App() {
         contextModule={activeMainModule}
         prefilledSlotCode={scannerPrefilledSlot}
         initialPutawayOption={scannerPutawayOption}
+        isCameraEnabled={isCameraGlobalEnabled}
+        onInboundNotification={handleInboundNotification}
         onExecutePutaway={handleExecutePutaway}
         onExecutePicking={handleExecutePicking}
         onExecuteAudit={handleExecuteAudit}
@@ -1755,6 +1926,75 @@ export default function App() {
         onLoadDemoData={handleLoadDemoData}
         onFactoryReset={handleFactoryReset}
       />
+
+      {/* Real-Time Inbound Notification Toast for Admin / SPV / Online Users */}
+      {incomingInboundToast && (
+        <div className="fixed top-4 right-4 z-50 max-w-sm sm:max-w-md w-full bg-slate-900/95 text-white rounded-2xl shadow-2xl border-2 border-emerald-500 p-4 animate-in slide-in-from-top-4 duration-300 backdrop-blur-md">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-0.5">
+                <CheckCircle2 className="w-6 h-6 stroke-[2.5]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider bg-emerald-500/30 text-emerald-200 px-2 py-0.5 rounded-full border border-emerald-500/40">
+                    Inbound 1 Pallet Berhasil
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {new Date(incomingInboundToast.createdAt || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                  </span>
+                </div>
+                <h4 className="text-sm font-black text-white mt-1">
+                  Pallet {incomingInboundToast.palletNumber} &bull; Slot {incomingInboundToast.slotCode}
+                </h4>
+                <p className="text-xs text-slate-300 mt-0.5 line-clamp-1">
+                  {incomingInboundToast.itemName} ({incomingInboundToast.quantityBox} BOX)
+                </p>
+                <div className="text-[10px] text-slate-400 mt-1">
+                  Petugas: <strong className="text-slate-200">{incomingInboundToast.operatorName}</strong>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIncomingInboundToast(null)}
+              className="text-slate-400 hover:text-white p-1 cursor-pointer text-lg leading-none"
+            >
+              &times;
+            </button>
+          </div>
+
+          <div className="mt-3 pt-2.5 border-t border-slate-800 flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setIncomingInboundToast(null)}
+              className="px-3 py-1.5 text-xs font-bold text-slate-400 hover:text-white transition cursor-pointer"
+            >
+              Tutup
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSelectedSummaryNotification(incomingInboundToast);
+                setIncomingInboundToast(null);
+              }}
+              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl transition cursor-pointer flex items-center gap-1 shadow-xs"
+            >
+              <span>Lihat Detail Summary</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Pop up Summary Hasil Inbound 1 Pallet Berhasil Modal */}
+      {selectedSummaryNotification && (
+        <InboundSummaryModal
+          isOpen={true}
+          onClose={() => setSelectedSummaryNotification(null)}
+          data={selectedSummaryNotification}
+        />
+      )}
     </>
   );
 }

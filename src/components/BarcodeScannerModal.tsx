@@ -31,10 +31,11 @@ import {
   RefreshCw,
   HelpCircle
 } from 'lucide-react';
-import { ProductItem, RackData, UserRole, ICStatus } from '../types';
+import { ProductItem, RackData, UserRole, ICStatus, InboundNotification } from '../types';
 import { soundManager } from '../utils/audio';
 import { parseSlotCode, findMatchingSlotKey, formatSlotCodeProper, formatSlotInput } from '../utils/barcode';
 import { parseFinishedGoodsQrCode, ParsedFinishedGoodsQr, SAMPLE_FG_QR_CODE, formatIsoDate, formatDdMmYyyy } from '../utils/productQrParser';
+import { InboundSummaryModal } from './InboundSummaryModal';
 
 export type ScannerMode = 'PUTAWAY' | 'PICKING' | 'AUDIT' | 'LOOKUP';
 
@@ -50,6 +51,8 @@ interface BarcodeScannerModalProps {
   contextModule?: string;
   prefilledSlotCode?: string;
   initialPutawayOption?: 'OPTION_1_RANGE' | 'OPTION_2_SCAN_ALL';
+  isCameraEnabled?: boolean;
+  onInboundNotification?: (notif: InboundNotification) => void;
   onExecutePutaway: (slotCode: string, palletData: {
     itemCode: string;
     itemName: string;
@@ -180,6 +183,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   contextModule,
   prefilledSlotCode = '',
   initialPutawayOption = 'OPTION_1_RANGE',
+  isCameraEnabled = true,
+  onInboundNotification,
   onExecutePutaway,
   onExecutePicking,
   onExecuteAudit,
@@ -200,6 +205,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [mode, setMode] = useState<ScannerMode>(initialMode);
   const [cameraActive, setCameraActive] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [lastInboundNotification, setLastInboundNotification] = useState<InboundNotification | null>(null);
+  const [showInboundSummaryModal, setShowInboundSummaryModal] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -319,21 +326,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     return s?.blockReason || 'Kendala fisik di lapangan (diblokir dari isi pallet IC)';
   }, [targetSlot, racks]);
 
-  // Daftar slot kosong yang siap pakai (tidak berkendala)
-  const readyEmptySlots = React.useMemo(() => {
-    const list: string[] = [];
-    for (const r of Object.values(racks)) {
-      for (const s of Object.values(r.slots)) {
-        if (!s.isBlocked && s.status !== 'maintenance' && s.status !== 'occupied') {
-          list.push(s.slotCode);
-          if (list.length >= 8) break;
-        }
-      }
-      if (list.length >= 8) break;
-    }
-    return list.length > 0 ? list : ['A1a', 'A2a', 'A3a', 'A4a', 'A1b', 'B1a', 'B2a'];
-  }, [racks]);
-
   useEffect(() => {
     if (prefilledSlotCode) {
       const proper = formatSlotCodeProper(prefilledSlotCode);
@@ -446,12 +438,16 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       // Clear deduplication cache so new session scans instantly
       lastScannedCodeRef.current = '';
       lastScannedTimeRef.current = 0;
-      startCamera();
+      if (isCameraEnabled) {
+        startCamera();
+      } else {
+        stopCamera();
+      }
     }
     return () => {
       stopCamera();
     };
-  }, [isOpen]);
+  }, [isOpen, isCameraEnabled]);
 
   // Global Hardware Scanner Gun (HID Keyboard Wedge) Listener
   useEffect(() => {
@@ -965,6 +961,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       ? `Putaway Opsi 1 (scan-range) (Range D${cartonStart}-D${cartonEnd}) oleh ${currentUserName}`
       : `Putaway Opsi 2 (scan allbox) (${scannedCartons.length} Karton ter-scan) oleh ${currentUserName}`;
 
+    const finalNotes = operatorNote.trim() ? `${operatorNote.trim()} | ${defaultNote}` : defaultNote;
+
     onExecutePutaway(properSlot, {
       itemCode: matchedProduct.itemCode,
       itemName: parsedFgQr.productName || matchedProduct.itemName,
@@ -983,8 +981,35 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       palletNumber: formatToKpPallet(palletNumber),
       rackingOption: putawayOption === 'OPTION_1_RANGE' ? 'RANGE' : 'MULTI_SCAN',
       icStatus: icStatus,
-      notes: operatorNote.trim() ? `${operatorNote.trim()} | ${defaultNote}` : defaultNote
+      notes: finalNotes
     });
+
+    const inbNotif: InboundNotification = {
+      id: `INB-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      type: 'INBOUND_SUCCESS',
+      palletNumber: formatToKpPallet(palletNumber),
+      itemName: parsedFgQr.productName || matchedProduct.itemName,
+      itemCode: matchedProduct.itemCode,
+      batchNo: parsedFgQr.batchNo,
+      quantityBox: calculatedBoxCount,
+      cartonRangeText: cartonRangeStr,
+      productionDate: parsedFgQr.productionDateFormatted || prodDateIso,
+      productionTime: parsedFgQr.productionTimeFormatted || '14:35 WIB',
+      expiryDate: parsedFgQr.bestBeforeFormatted || expiryDateIso,
+      slotCode: properSlot,
+      operatorName: currentUserName,
+      icStatus: icStatus,
+      timestamp: new Date().toISOString(),
+      createdAt: Date.now(),
+      notes: finalNotes
+    };
+
+    setLastInboundNotification(inbNotif);
+    setShowInboundSummaryModal(true);
+
+    if (onInboundNotification) {
+      onInboundNotification(inbNotif);
+    }
 
     soundManager.playScanSuccess();
     setPutawaySuccess(true);
@@ -1173,55 +1198,81 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               Proses
             </button>
 
-            <button
-              type="button"
-              onClick={() => (cameraActive ? stopCamera() : startCamera())}
-              className={`px-3.5 py-3 sm:py-3.5 rounded-xl border-2 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 font-bold text-xs ${
-                cameraActive
-                  ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100'
-                  : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
-              }`}
-              title={cameraActive ? 'Tutup Kamera' : 'Buka Kamera HP Pemindai'}
-            >
-              {cameraActive ? (
-                <>
-                  <CameraOff className="w-5 h-5" />
-                  <span className="hidden sm:inline">Matikan</span>
-                </>
-              ) : (
-                <>
-                  <Camera className="w-5 h-5" />
-                  <span>Kamera HP</span>
-                </>
-              )}
-            </button>
+            {isCameraEnabled && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => (cameraActive ? stopCamera() : startCamera())}
+                  className={`px-3.5 py-3 sm:py-3.5 rounded-xl border-2 transition cursor-pointer flex items-center justify-center gap-1.5 shrink-0 font-bold text-xs ${
+                    cameraActive
+                      ? 'bg-rose-50 border-rose-300 text-rose-700 hover:bg-rose-100'
+                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                  }`}
+                  title={cameraActive ? 'Tutup Kamera' : 'Buka Kamera HP Pemindai'}
+                >
+                  {cameraActive ? (
+                    <>
+                      <CameraOff className="w-5 h-5" />
+                      <span className="hidden sm:inline">Matikan</span>
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="w-5 h-5" />
+                      <span>Kamera HP</span>
+                    </>
+                  )}
+                </button>
 
-            {/* Direct Photo Capture Input for Mobile Devices (Bisa Ambil Foto Kamera Langsung) */}
-            <input
-              ref={photoInputRef}
-              type="file"
-              accept="image/*"
-              capture="environment"
-              onChange={handleImageFileScan}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => photoInputRef.current?.click()}
-              className="p-3 sm:p-3.5 rounded-xl border-2 border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition cursor-pointer flex items-center justify-center shrink-0"
-              title="Ambil Foto Barcode via Kamera HP / Unggah Gambar"
-            >
-              <Upload className="w-5 h-5 text-slate-600" />
-            </button>
+                {/* Direct Photo Capture Input for Mobile Devices (Bisa Ambil Foto Kamera Langsung) */}
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleImageFileScan}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => photoInputRef.current?.click()}
+                  className="p-3 sm:p-3.5 rounded-xl border-2 border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition cursor-pointer flex items-center justify-center shrink-0"
+                  title="Ambil Foto Barcode via Kamera HP / Unggah Gambar"
+                >
+                  <Upload className="w-5 h-5 text-slate-600" />
+                </button>
+              </>
+            )}
           </div>
 
-          {/* Quick Activation Bar if Camera is Inactive */}
-          {!cameraActive && (
+          {/* Banner Mode Scanner Gun jika Akses Kamera OFF oleh Super Admin */}
+          {!isCameraEnabled && (
+            <div className="flex items-center justify-between p-3 bg-slate-900 text-white border border-slate-800 rounded-xl text-xs shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
+                  <Scan className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-white">Mode Scanner Gun Fisik Aktif</span>
+                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
+                      Akses Kamera OFF (Super Admin)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Gunakan alat Scanner Barcode Gun (USB / Bluetooth) atau ketik manual untuk membaca kode.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Activation Bar if Camera is Inactive and Camera is Allowed */}
+          {isCameraEnabled && !cameraActive && (
             <div className="flex items-center justify-between p-2.5 bg-cyan-50/70 border border-cyan-200 rounded-xl text-xs">
               <div className="flex items-center gap-2 text-cyan-900">
                 <Camera className="w-4 h-4 text-cyan-700 shrink-0" />
                 <span className="font-semibold">
-                  Akses kamera belum aktif. Klik tombol di kanan untuk mulai scan langsung dengan kamera HP Anda.
+                  Akses kamera siap. Klik tombol di kanan untuk mulai scan langsung dengan kamera HP Anda.
                 </span>
               </div>
               <div className="flex items-center gap-2 shrink-0">
@@ -1813,37 +1864,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
                           {/* Pallet Number with Scanner & Camera Support (Format KP-001 s/d seterusnya) */}
                           <div className="p-4 sm:p-5 bg-cyan-50/50 rounded-2xl border-2 border-cyan-200 space-y-3">
-                            <div className="flex items-center justify-between flex-wrap gap-2">
-                              <div>
-                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                                  <Scan className="w-4 h-4 text-cyan-600" />
-                                  Nomor Pallet (Scan QR Pallet - Format KP-001)
-                                </label>
-                                <span className="text-[11px] text-slate-500">
-                                  Isian dikosongkan untuk di-scan via <strong>Scanner Gun</strong> / <strong>Kamera</strong> membaca QR pada pallet (tidak selalu harus urut).
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const next = getNextKpPalletNumber(racks);
-                                    setPalletNumber(next);
-                                    soundManager.playScanSuccess();
-                                  }}
-                                  className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 text-cyan-800 border border-cyan-300 rounded-lg shadow-2xs transition cursor-pointer"
-                                >
-                                  Otomatis: {getNextKpPalletNumber(racks)}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={handleIncrementPalletNumber}
-                                  className="px-2.5 py-1 text-[11px] font-bold bg-cyan-600 hover:bg-cyan-700 text-white rounded-lg shadow-2xs transition cursor-pointer"
-                                  title="Tambah nomor urut pallet (+1)"
-                                >
-                                  +1 Pallet
-                                </button>
-                              </div>
+                            <div>
+                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
+                                <Scan className="w-4 h-4 text-cyan-600" />
+                                Nomor Pallet (Scan QR Pallet - Format KP-001)
+                              </label>
+                              <span className="text-[11px] text-slate-500">
+                                Isian dikosongkan untuk di-scan langsung membaca barcode/QR pada pallet (tidak selalu harus urut).
+                              </span>
                             </div>
 
                             <div className="flex items-center gap-2">
@@ -1861,6 +1889,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                                   <span>Format KP</span>
                                 </div>
                               </div>
+                              {isCameraEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      stopCamera();
+                                    }
+                                  }}
+                                  className={`h-12 sm:h-13 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
+                                    cameraActive
+                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
+                                      : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-700'
+                                  }`}
+                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Pallet'}
+                                >
+                                  <Camera className="w-4 h-4" />
+                                  <span>{cameraActive ? 'Stop' : 'Scan QR Pallet'}</span>
+                                </button>
+                              )}
                             </div>
 
                             {/* Scanner / Camera Hint Banner */}
@@ -1868,23 +1917,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               <div className="flex items-center gap-2">
                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                                 <span className="font-semibold">
-                                  Scanner & Kamera Siap Membaca: Tembak barcode/QR pallet (format <strong>KP-001</strong>) untuk mengisi otomatis.
+                                  {isCameraEnabled 
+                                    ? 'Scanner Gun & Kamera Siap: Tembak barcode/QR pallet (format KP-001) untuk mengisi otomatis.'
+                                    : 'Scanner Gun Siap: Tembak barcode/QR pallet (format KP-001) menggunakan Scanner Gun.'}
                                 </span>
                               </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  if (!cameraActive) {
-                                    startCamera();
-                                  } else {
-                                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                                  }
-                                }}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5"
-                              >
-                                <Camera className="w-3.5 h-3.5" />
-                                <span>{cameraActive ? 'Kamera Aktif' : 'Aktifkan Kamera'}</span>
-                              </button>
+                              {isCameraEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5"
+                                >
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <span>{cameraActive ? 'Kamera Aktif' : 'Aktifkan Kamera'}</span>
+                                </button>
+                              )}
                             </div>
                           </div>
 
@@ -2001,18 +2054,41 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800">
                               Kode Slot Rak Terpilih:
                             </label>
-                            <input
-                              type="text"
-                              value={targetSlot}
-                              onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
-                              onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
-                              placeholder="Contoh: A1a, F2b, A3m"
-                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
-                                isTargetSlotBlocked 
-                                  ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
-                                  : 'border-slate-300 text-cyan-950 focus:border-cyan-500 focus:ring-cyan-100'
-                              }`}
-                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={targetSlot}
+                                onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
+                                onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
+                                placeholder="Contoh: A1a, F2b, A3m"
+                                className={`flex-1 h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
+                                  isTargetSlotBlocked 
+                                    ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
+                                    : 'border-slate-300 text-cyan-950 focus:border-cyan-500 focus:ring-cyan-100'
+                                }`}
+                              />
+                              {isCameraEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      stopCamera();
+                                    }
+                                  }}
+                                  className={`h-13 sm:h-14 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
+                                    cameraActive
+                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
+                                      : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-700'
+                                  }`}
+                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Slot Rak'}
+                                >
+                                  <Camera className="w-4 h-4" />
+                                  <span>{cameraActive ? 'Stop' : 'Scan QR Rak'}</span>
+                                </button>
+                              )}
+                            </div>
 
                             {/* Alert jika slot yang dipilih terkendala di lapangan */}
                             {isTargetSlotBlocked && (
@@ -2027,24 +2103,42 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               </div>
                             )}
 
-                            {/* Quick Empty Slot Buttons */}
-                            <div className="flex items-center gap-2 flex-wrap pt-1">
-                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready (Huruf ke-3 kecil):</span>
-                              {readyEmptySlots.map(sCode => (
+                            {/* Scanner / Camera Hint & Activation for Rack QR */}
+                            {isCameraEnabled ? (
+                              <div className="p-3 bg-cyan-50/70 border border-cyan-200 rounded-xl flex items-center justify-between text-xs text-cyan-950 flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2.5 h-2.5 rounded-full ${cameraActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'} shrink-0`} />
+                                  <span className="font-semibold">
+                                    {cameraActive
+                                      ? 'Kamera Aktif: Arahkan ke sticker QR Code Slot Rak (misal A1a, B2b)'
+                                      : 'Akses Kamera Siap: Scan sticker QR Slot Rak menggunakan Kamera HP / Scanner Gun:'}
+                                  </span>
+                                </div>
                                 <button
-                                  key={sCode}
                                   type="button"
-                                  onClick={() => setTargetSlot(formatSlotCodeProper(sCode))}
-                                  className={`px-3 py-1.5 text-xs sm:text-sm font-mono font-bold rounded-xl transition cursor-pointer ${
-                                    targetSlot === formatSlotCodeProper(sCode)
-                                      ? 'bg-cyan-600 text-white shadow-xs'
-                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      stopCamera();
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 font-bold text-xs rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5 ${
+                                    cameraActive
+                                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                      : 'bg-cyan-700 hover:bg-cyan-800 text-white'
                                   }`}
                                 >
-                                  {formatSlotCodeProper(sCode)}
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <span>{cameraActive ? 'Matikan Kamera' : 'Nyalakan Kamera untuk Scan QR Rak'}</span>
                                 </button>
-                              ))}
-                            </div>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-700">
+                                <Scan className="w-4 h-4 text-slate-500 shrink-0" />
+                                <span>Tembak Scanner Gun ke sticker barcode/QR Slot Rak pada tiang rak fisik (Contoh: A1a, B2b).</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Storage Recap Card */}
@@ -2402,18 +2496,41 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800">
                               Kode Slot Rak Terpilih:
                             </label>
-                            <input
-                              type="text"
-                              value={targetSlot}
-                              onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
-                              onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
-                              placeholder="Contoh: A1a, F2b, A3m"
-                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
-                                isTargetSlotBlocked 
-                                  ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
-                                  : 'border-slate-300 text-emerald-950 focus:border-emerald-500 focus:ring-emerald-100'
-                              }`}
-                            />
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text"
+                                value={targetSlot}
+                                onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
+                                onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
+                                placeholder="Contoh: A1a, F2b, A3m"
+                                className={`flex-1 h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
+                                  isTargetSlotBlocked 
+                                    ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
+                                    : 'border-slate-300 text-emerald-950 focus:border-emerald-500 focus:ring-emerald-100'
+                                }`}
+                              />
+                              {isCameraEnabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      stopCamera();
+                                    }
+                                  }}
+                                  className={`h-13 sm:h-14 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
+                                    cameraActive
+                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
+                                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                                  }`}
+                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Slot Rak'}
+                                >
+                                  <Camera className="w-4 h-4" />
+                                  <span>{cameraActive ? 'Stop' : 'Scan QR Rak'}</span>
+                                </button>
+                              )}
+                            </div>
 
                             {/* Alert jika slot yang dipilih terkendala di lapangan */}
                             {isTargetSlotBlocked && (
@@ -2428,24 +2545,42 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               </div>
                             )}
 
-                            {/* Quick Empty Slot Buttons */}
-                            <div className="flex items-center gap-2 flex-wrap pt-1">
-                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready (Huruf ke-3 kecil):</span>
-                              {readyEmptySlots.map(sCode => (
+                            {/* Scanner / Camera Hint & Activation for Rack QR (Option 2) */}
+                            {isCameraEnabled ? (
+                              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-950 flex-wrap gap-2">
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2.5 h-2.5 rounded-full ${cameraActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'} shrink-0`} />
+                                  <span className="font-semibold">
+                                    {cameraActive
+                                      ? 'Kamera Aktif: Arahkan ke sticker QR Code Slot Rak (misal A1a, B2b)'
+                                      : 'Akses Kamera Siap: Scan sticker QR Slot Rak menggunakan Kamera HP / Scanner Gun:'}
+                                  </span>
+                                </div>
                                 <button
-                                  key={sCode}
                                   type="button"
-                                  onClick={() => setTargetSlot(formatSlotCodeProper(sCode))}
-                                  className={`px-3 py-1.5 text-xs sm:text-sm font-mono font-bold rounded-xl transition cursor-pointer ${
-                                    targetSlot === formatSlotCodeProper(sCode)
-                                      ? 'bg-emerald-600 text-white shadow-xs'
-                                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
+                                  onClick={() => {
+                                    if (!cameraActive) {
+                                      startCamera();
+                                    } else {
+                                      stopCamera();
+                                    }
+                                  }}
+                                  className={`px-3 py-1.5 font-bold text-xs rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5 ${
+                                    cameraActive
+                                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
+                                      : 'bg-emerald-700 hover:bg-emerald-800 text-white'
                                   }`}
                                 >
-                                  {formatSlotCodeProper(sCode)}
+                                  <Camera className="w-3.5 h-3.5" />
+                                  <span>{cameraActive ? 'Matikan Kamera' : 'Nyalakan Kamera untuk Scan QR Rak'}</span>
                                 </button>
-                              ))}
-                            </div>
+                              </div>
+                            ) : (
+                              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-700">
+                                <Scan className="w-4 h-4 text-slate-500 shrink-0" />
+                                <span>Tembak Scanner Gun ke sticker barcode/QR Slot Rak pada tiang rak fisik (Contoh: A1a, B2b).</span>
+                              </div>
+                            )}
                           </div>
 
                           {/* Storage Recap Card */}
@@ -2845,6 +2980,27 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           )}
         </div>
       </div>
+
+      {/* Pop up summary hasil inbound 1 pallet berhasil */}
+      {showInboundSummaryModal && lastInboundNotification && (
+        <InboundSummaryModal
+          isOpen={showInboundSummaryModal}
+          onClose={() => setShowInboundSummaryModal(false)}
+          data={lastInboundNotification}
+          onNextPallet={() => {
+            setShowInboundSummaryModal(false);
+            setPutawayStep(1);
+            setPutawaySuccess(false);
+            setPalletNumber('');
+            setTargetSlot('');
+            setParsedFgQr(null);
+            setScannedCartons([]);
+            if (isCameraEnabled) {
+              startCamera();
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -19,7 +19,7 @@ import {
   orderBy,
   limit
 } from 'firebase/firestore';
-import { RackData, ProductItem, UserAccount, EmployeePIC, ActivityLog } from './types';
+import { RackData, ProductItem, UserAccount, EmployeePIC, ActivityLog, InboundNotification } from './types';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase App
@@ -398,9 +398,13 @@ function sanitizeStagingAreasForCloud(areas: any[]): any[] {
 export async function saveSystemConfigToCloud(data: {
   stagingAreas?: any[];
   rolePermissions?: any;
+  isCameraScannerEnabled?: boolean;
 }): Promise<boolean> {
   try {
     const payload: any = {};
+    if (data.isCameraScannerEnabled !== undefined) {
+      payload.isCameraScannerEnabled = data.isCameraScannerEnabled;
+    }
     if (data.rolePermissions) {
       payload.rolePermissions = data.rolePermissions;
     }
@@ -480,3 +484,35 @@ export async function seedInitialCloudDataIfEmpty(
     console.error('[Firebase] Error checking or seeding cloud data:', err);
   }
 }
+
+// -------------------------------------------------------------
+// INBOUND NOTIFICATIONS SYNC
+// -------------------------------------------------------------
+export function subscribeToInboundNotifications(callback: (notifications: InboundNotification[]) => void) {
+  const notifCol = collection(db, 'inbound_notifications');
+  const q = query(notifCol, limit(50));
+  return onSnapshot(q, (snapshot) => {
+    if (snapshot.empty) {
+      callback([]);
+      return;
+    }
+    const list: InboundNotification[] = [];
+    snapshot.forEach((docSnap) => {
+      list.push(docSnap.data() as InboundNotification);
+    });
+    list.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    callback(list);
+  }, (err) => {
+    console.error('[Firebase] Inbound notifications subscription error:', err);
+  });
+}
+
+export async function sendInboundNotificationToCloud(notif: InboundNotification) {
+  try {
+    await setDoc(doc(db, 'inbound_notifications', notif.id), cleanForFirestore(notif));
+    console.log(`[Firebase] Inbound notification ${notif.id} sent to cloud`);
+  } catch (err) {
+    console.error('[Firebase] Failed to send inbound notification to cloud:', err);
+  }
+}
+

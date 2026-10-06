@@ -37,9 +37,12 @@ import {
   CheckCircle2,
   X,
   HelpCircle,
-  RefreshCw
+  RefreshCw,
+  Bell,
+  Camera,
+  Scan
 } from 'lucide-react';
-import { UserAccount, UserRole } from '../types';
+import { UserAccount, UserRole, InboundNotification } from '../types';
 import { CartoonWarehouseLogo } from './CartoonWarehouseLogo';
 
 export type MainModule = 'main-hub' | 'dashboard' | 'in-warehouse' | 'out-warehouse' | 'stock-opname' | 'data-master' | 'configuration-system' | 'sop-flowchart';
@@ -63,6 +66,12 @@ interface HeaderProps {
   cloudSyncStatus?: 'connected' | 'syncing' | 'offline' | 'error';
   onForceSyncCloud?: () => Promise<boolean>;
   onPullFromCloud?: () => Promise<boolean>;
+  inboundNotifications?: InboundNotification[];
+  unreadInboundCount?: number;
+  onOpenInboundSummary?: (notif: InboundNotification) => void;
+  onMarkAllInboundAsRead?: () => void;
+  isCameraScannerEnabled?: boolean;
+  onToggleCameraScanner?: (enabled: boolean) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -83,10 +92,17 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleDeviceViewMode,
   cloudSyncStatus = 'connected',
   onForceSyncCloud,
-  onPullFromCloud
+  onPullFromCloud,
+  inboundNotifications = [],
+  unreadInboundCount = 0,
+  onOpenInboundSummary,
+  onMarkAllInboundAsRead,
+  isCameraScannerEnabled = true,
+  onToggleCameraScanner
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isNotifDropdownOpen, setIsNotifDropdownOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
   const [syncActionLoading, setSyncActionLoading] = useState(false);
@@ -340,6 +356,142 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="md:hidden hidden sm:inline">Reset IC</span>
               </button>
             )}
+
+            {/* Fitur Khusus Super Admin: ON / OFF Fitur Kamera Digunakan di Semua User */}
+            {currentUser.role === 'superadmin' && onToggleCameraScanner && (
+              <button
+                type="button"
+                onClick={() => onToggleCameraScanner(!isCameraScannerEnabled)}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs font-black transition cursor-pointer shadow-xs border ${
+                  isCameraScannerEnabled
+                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border-emerald-300'
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-900 border-amber-300'
+                }`}
+                title={
+                  isCameraScannerEnabled
+                    ? 'Kamera ON untuk Semua User. Klik untuk beralih ke Mode Scanner Gun Fisik (Kamera OFF)'
+                    : 'Kamera OFF (Mode Scanner Gun Aktif). Klik untuk mengaktifkan Kamera di semua user'
+                }
+              >
+                {isCameraScannerEnabled ? (
+                  <>
+                    <Camera className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                    <span className="hidden md:inline">Kamera: ON</span>
+                    <span className="md:hidden hidden sm:inline">Kamera ON</span>
+                  </>
+                ) : (
+                  <>
+                    <Scan className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span className="hidden md:inline">Kamera: OFF (Scanner)</span>
+                    <span className="md:hidden hidden sm:inline">Scanner Gun</span>
+                  </>
+                )}
+              </button>
+            )}
+
+            {/* Notification Bell for Inbound 1 Pallet Notifications */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsNotifDropdownOpen(!isNotifDropdownOpen);
+                  setIsUserMenuOpen(false);
+                }}
+                className={`p-2 rounded-xl transition cursor-pointer relative border flex items-center justify-center ${
+                  unreadInboundCount > 0
+                    ? 'bg-emerald-50 border-emerald-300 text-emerald-800 hover:bg-emerald-100'
+                    : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'
+                }`}
+                title={`Notifikasi Inbound Pallet (${unreadInboundCount} belum dibaca)`}
+                aria-label="Notifikasi Inbound"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadInboundCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-rose-600 text-white font-black text-[10px] rounded-full flex items-center justify-center px-1 shadow animate-pulse">
+                    {unreadInboundCount > 99 ? '99+' : unreadInboundCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Inbound Notifications Dropdown Panel */}
+              {isNotifDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-80 sm:w-96 bg-white rounded-2xl shadow-2xl border border-slate-200 p-3 z-50 animate-in fade-in zoom-in-95">
+                  <div className="flex items-center justify-between pb-2.5 mb-2 border-b border-slate-100">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                        <CheckCircle2 className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-black text-slate-900 leading-tight">
+                          Notifikasi Inbound Pallet
+                        </h4>
+                        <span className="text-[10px] font-bold text-emerald-700 block">
+                          Real-Time Broadcast
+                        </span>
+                      </div>
+                    </div>
+                    {onMarkAllInboundAsRead && unreadInboundCount > 0 && (
+                      <button
+                        type="button"
+                        onClick={onMarkAllInboundAsRead}
+                        className="text-[10px] font-bold text-slate-500 hover:text-slate-800 cursor-pointer bg-slate-100 hover:bg-slate-200 px-2 py-1 rounded-md"
+                      >
+                        Tandai Dibaca
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="max-h-72 overflow-y-auto space-y-2 pr-0.5">
+                    {inboundNotifications.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 text-xs">
+                        Belum ada notifikasi inbound pallet masuk.
+                      </div>
+                    ) : (
+                      inboundNotifications.slice(0, 15).map((notif) => (
+                        <div
+                          key={notif.id}
+                          onClick={() => {
+                            setIsNotifDropdownOpen(false);
+                            onOpenInboundSummary?.(notif);
+                          }}
+                          className={`p-2.5 rounded-xl transition cursor-pointer text-xs space-y-1 border ${
+                            !notif.read
+                              ? 'bg-emerald-50/80 hover:bg-emerald-100/80 border-emerald-300'
+                              : 'bg-slate-50 hover:bg-slate-100 border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono font-black text-slate-900 bg-white px-1.5 py-0.5 rounded border border-slate-200 text-[11px]">
+                              {notif.palletNumber}
+                            </span>
+                            <span className="font-mono font-black text-emerald-800 bg-emerald-100 px-1.5 py-0.5 rounded text-[11px]">
+                              Slot {notif.slotCode}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {new Date(notif.createdAt || Date.now()).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })} WIB
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[11px] pt-0.5">
+                            <span className="font-bold text-slate-800 truncate max-w-[180px]">
+                              {notif.itemName}
+                            </span>
+                            <span className="font-mono font-black text-amber-900 bg-amber-100/70 px-1.5 py-0.2 rounded">
+                              {notif.quantityBox} BOX
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 border-t border-slate-200/50 mt-1">
+                            <span>PIC: <strong>{notif.operatorName}</strong></span>
+                            <span className="text-cyan-700 font-bold hover:underline">
+                              Lihat Summary &rarr;
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* User Profile & Role Dropdown */}
             <div className="relative">
