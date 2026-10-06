@@ -144,6 +144,45 @@ export function charToBayCount(char: string): number {
   return Math.max(1, Math.min(26, count || 1));
 }
 
+/**
+ * Ensures the third letter (bay) of a rack slot code is strictly lowercase.
+ * Contoh: "A1A" -> "A1a", "RAK-A1A" -> "A1a", "a1a" -> "A1a", "F2B" -> "F2b"
+ */
+export function formatSlotCodeProper(rawCode?: string | null): string {
+  if (!rawCode) return '';
+  const clean = rawCode.trim();
+  const parsed = parseSlotCode(clean);
+  if (parsed && parsed.canonicalSlotCode) {
+    return parsed.canonicalSlotCode; // canonical is `${rackId}${level}${bay.toLowerCase()}`
+  }
+  const match = clean.replace(/^RAK-?/i, '').match(/^([A-Za-z0-9]+?)(\d+)([A-Za-z]+)$/);
+  if (match) {
+    const rackId = match[1].toUpperCase();
+    const level = match[2];
+    const bay = match[3].toLowerCase(); // 3rd character must be lowercase
+    return `${rackId}${level}${bay}`;
+  }
+  return clean;
+}
+
+/**
+ * Formats user input as they type: keeps rack ID uppercase, level as is, and bay letter (3rd char) lowercase.
+ * Contoh: "a1a" -> "A1a", "A1A" -> "A1a", "b2" -> "B2", "rak-a1a" -> "A1a"
+ */
+export function formatSlotInput(val: string): string {
+  if (!val) return '';
+  const clean = val.trim();
+  const withoutPrefix = clean.replace(/^RAK-?/i, '');
+  const match = withoutPrefix.match(/^([A-Za-z0-9]+?)(\d*)([A-Za-z]*)$/);
+  if (match) {
+    const rackId = match[1].toUpperCase();
+    const level = match[2] || '';
+    const bay = (match[3] || '').toLowerCase(); // huruf ketiga selalu kecil!
+    return `${rackId}${level}${bay}`;
+  }
+  return clean;
+}
+
 export function generateStandard4PalletSlots(rackId: string): string[] {
   return ['P1', 'P2', 'P3', 'P4'];
 }

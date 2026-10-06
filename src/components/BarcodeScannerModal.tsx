@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { ProductItem, RackData, UserRole, ICStatus } from '../types';
 import { soundManager } from '../utils/audio';
-import { parseSlotCode, findMatchingSlotKey } from '../utils/barcode';
+import { parseSlotCode, findMatchingSlotKey, formatSlotCodeProper, formatSlotInput } from '../utils/barcode';
 import { parseFinishedGoodsQrCode, ParsedFinishedGoodsQr, SAMPLE_FG_QR_CODE, formatIsoDate, formatDdMmYyyy } from '../utils/productQrParser';
 
 export type ScannerMode = 'PUTAWAY' | 'PICKING' | 'AUDIT' | 'LOOKUP';
@@ -231,7 +231,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [parsedFgQr, setParsedFgQr] = useState<ParsedFinishedGoodsQr | null>(null);
   const [cartonStart, setCartonStart] = useState<number>(72);
   const [cartonEnd, setCartonEnd] = useState<number>(86);
-  const [palletNumber, setPalletNumber] = useState<string>(() => getNextKpPalletNumber(racks));
+  // Pallet number is left empty by default as user will scan pallet QR code (not always sequential)
+  const [palletNumber, setPalletNumber] = useState<string>('');
   const [operatorNote, setOperatorNote] = useState<string>('');
   const [icStatus, setIcStatus] = useState<ICStatus>('OK');
   const [scannedCartons, setScannedCartons] = useState<Array<{
@@ -243,13 +244,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     scannedAt: string;
   }>>([]);
   const [option2Notice, setOption2Notice] = useState<string | null>(null);
-  const [targetSlot, setTargetSlot] = useState(prefilledSlotCode || 'A1a');
+  const [targetSlot, setTargetSlot] = useState(prefilledSlotCode ? formatSlotCodeProper(prefilledSlotCode) : 'A1a');
   const [putawaySuccess, setPutawaySuccess] = useState(false);
 
   // Helper to ensure Pallet Number adheres to "KP-001" format
   const formatToKpPallet = (val: string): string => {
     const clean = (val || '').trim().toUpperCase();
-    if (!clean) return getNextKpPalletNumber(racks);
+    if (!clean) return '';
     const numMatch = clean.match(/(\d+)/);
     if (numMatch) {
       const num = parseInt(numMatch[1], 10);
@@ -270,18 +271,13 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     soundManager.playScanSuccess();
   };
 
-  // Reset icStatus and synchronize palletNumber with standard KP format when modal is opened
+  // Reset icStatus and keep palletNumber empty when modal is opened (waiting for pallet QR scan)
   useEffect(() => {
     if (isOpen) {
       setIcStatus('OK');
-      setPalletNumber(prev => {
-        if (!prev || prev.startsWith('PLT-') || prev === 'PLT-A-01' || prev === 'PLT-A-02') {
-          return getNextKpPalletNumber(racks);
-        }
-        return prev;
-      });
+      setPalletNumber(''); // Kosongkan saja sesuai instruksi user
     }
-  }, [isOpen, racks]);
+  }, [isOpen]);
 
   // Lookup result state
   const [lookupResult, setLookupResult] = useState<{
@@ -340,9 +336,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   useEffect(() => {
     if (prefilledSlotCode) {
-      setTargetSlot(prefilledSlotCode);
-      setPickingSlotCode(prefilledSlotCode);
-      setAuditSlotCode(prefilledSlotCode);
+      const proper = formatSlotCodeProper(prefilledSlotCode);
+      setTargetSlot(proper);
+      setPickingSlotCode(proper);
+      setAuditSlotCode(proper);
     }
   }, [prefilledSlotCode]);
 
@@ -655,34 +652,39 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     if (isSlotPattern) {
       const rackId = slotParsed?.rackId || code.replace(/[^A-Za-z]/g, '').slice(0, 1).toUpperCase();
       const matchedKey = racks[rackId]
-        ? (findMatchingSlotKey(racks[rackId].slots, code) || slotParsed?.canonicalSlotCode || code.toUpperCase())
-        : (slotParsed?.canonicalSlotCode || code.toUpperCase());
+        ? (findMatchingSlotKey(racks[rackId].slots, code) || slotParsed?.canonicalSlotCode || formatSlotCodeProper(code))
+        : (slotParsed?.canonicalSlotCode || formatSlotCodeProper(code));
+      const properSlot = formatSlotCodeProper(matchedKey);
 
       if (mode === 'PUTAWAY') {
-        setTargetSlot(matchedKey);
+        setTargetSlot(properSlot);
+        stopCamera(); // Otomatis kamera langsung off saat selesai scan
         if (putawayOption === 'OPTION_1_RANGE') {
           if (parsedFgQr) {
             // Product already scanned, advance to step 3 so rack is ready to confirm
             setPutawayStep(3);
           } else {
-            setOption2Notice(`Slot ${matchedKey} telah dipilih. Sekarang scan barcode QR Box FG.`);
+            setOption2Notice(`Slot ${properSlot} telah dipilih. Sekarang scan barcode QR Box FG.`);
           }
         } else {
           if (scannedCartons.length >= 2) {
             setPutawayStep(2);
           } else {
-            setOption2Notice(`Slot ${matchedKey} tersimpan. Selesaikan scan minimal 2 karton box terlebih dahulu.`);
+            setOption2Notice(`Slot ${properSlot} tersimpan. Selesaikan scan minimal 2 karton box terlebih dahulu.`);
           }
         }
         return;
       } else if (mode === 'PICKING') {
-        setPickingSlotCode(matchedKey);
+        setPickingSlotCode(properSlot);
+        stopCamera();
         return;
       } else if (mode === 'AUDIT') {
-        setAuditSlotCode(matchedKey);
+        setAuditSlotCode(properSlot);
+        stopCamera();
         return;
       } else {
-        doLookup(matchedKey);
+        doLookup(properSlot);
+        stopCamera();
         return;
       }
     }
@@ -702,6 +704,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
       if (mode === 'PUTAWAY') {
         setPalletNumber(normalizedPallet);
+        stopCamera(); // Otomatis kamera langsung off saat selesai scan
         setOption2Notice(`✓ Nomor Pallet ${normalizedPallet} berhasil terbaca dari scanner/kamera!`);
         return;
       } else if (mode === 'PICKING') {
@@ -713,6 +716,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               s.pallet.palletNumber?.toUpperCase() === code.toUpperCase()
             )) {
               setPickingSlotCode(s.slotCode);
+              stopCamera();
               return;
             }
           }
@@ -747,21 +751,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       setCartonEnd(parsedFg.cartonNumber);
       setCartonStart(Math.max(1, parsedFg.cartonNumber - 14));
       
-      // Auto-assign or keep KP-001 format
-      setPalletNumber(prev => {
-        if (!prev || prev.startsWith('PLT-') || prev === 'PLT-A-01' || prev === 'PLT-A-02') {
-          return getNextKpPalletNumber(racks);
-        }
-        return prev;
-      });
-
+      // Catatan: isian nomor pallet dibiarkan kosong agar operator scan QR pada pallet
       setOperatorNote(`Verified QR FG ${parsedFg.productName} • Batch ${parsedFg.batchNo} (${parsedFg.cartonNumberFormatted})`);
 
       if (mode === 'PUTAWAY') {
         if (putawayOption === 'OPTION_1_RANGE') {
-          // Auto fill step 1 & immediately direct to Step 2 (Range Box & Nomor Pallet KP-xxx)
+          // Otomatis kamera langsung off dan lanjut ke langkah selanjutnya (Langkah 2)
+          stopCamera();
           setPutawayStep(2);
-          setOption2Notice(`✓ Detail produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil terinput! Silakan periksa range box & nomor pallet format KP-001.`);
+          setOption2Notice(`✓ Detail produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil terinput! Silakan atur range box & scan nomor pallet.`);
           return;
         } else {
           // OPTION 2: SCAN ALL QR CARTONS (MIN 2, MAX 15)
@@ -823,13 +821,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
     if (matchingProd) {
       if (mode === 'PUTAWAY') {
+        stopCamera();
         const genericFg = parseFinishedGoodsQrCode(SAMPLE_FG_QR_CODE);
         genericFg.productName = matchingProd.itemName;
         genericFg.productPin = matchingProd.itemCode.slice(-4);
         setParsedFgQr(genericFg);
         setCartonStart(1);
         setCartonEnd(Math.min(15, matchingProd.boxPerPallet || 15));
-        setPalletNumber(prev => prev.startsWith('KP-') ? prev : getNextKpPalletNumber(racks));
+        setPalletNumber(''); // Kosongkan saja sesuai instruksi user (diisi lewat scan pallet)
         setPutawayStep(2);
         setOption2Notice(`✓ Produk ${matchingProd.itemName} terinput! Silakan tentukan range box & scan nomor pallet.`);
         return;
@@ -930,9 +929,18 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const handleFinalPutawaySubmit = () => {
     if (!targetSlot || !parsedFgQr || !isBoxCountValid) return;
 
+    const cleanPallet = (palletNumber || '').trim();
+    if (!cleanPallet) {
+      soundManager.playScanError();
+      alert('Harap scan atau isi Nomor Pallet (format KP-001 s/d seterusnya) sebelum konfirmasi simpan!');
+      return;
+    }
+
+    const properSlot = formatSlotCodeProper(targetSlot);
+
     if (isTargetSlotBlocked) {
       soundManager.playScanError();
-      alert(`PENEMPATAN DIBLOKIR: Slot ${targetSlot} sedang TERKENDALA DI LAPANGAN (${targetSlotBlockedReason}). Tidak dapat diisikan pallet IC! Harap pilih slot lain.`);
+      alert(`PENEMPATAN DIBLOKIR: Slot ${properSlot} sedang TERKENDALA DI LAPANGAN (${targetSlotBlockedReason}). Tidak dapat diisikan pallet IC! Harap pilih slot lain.`);
       return;
     }
 
@@ -957,7 +965,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       ? `Putaway Opsi 1 (scan-range) (Range D${cartonStart}-D${cartonEnd}) oleh ${currentUserName}`
       : `Putaway Opsi 2 (scan allbox) (${scannedCartons.length} Karton ter-scan) oleh ${currentUserName}`;
 
-    onExecutePutaway(targetSlot, {
+    onExecutePutaway(properSlot, {
       itemCode: matchedProduct.itemCode,
       itemName: parsedFgQr.productName || matchedProduct.itemName,
       quantityBox: calculatedBoxCount,
@@ -1384,7 +1392,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         setPutawayStep(1);
                         setScannedCartons([]);
                         setOperatorNote('');
-                        setPalletNumber(getNextKpPalletNumber(racks));
+                        setPalletNumber(''); // Kosongkan saja untuk diisi via scan pallet
                       }}
                       className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow hover:bg-emerald-700 transition cursor-pointer"
                     >
@@ -1809,10 +1817,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               <div>
                                 <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
                                   <Scan className="w-4 h-4 text-cyan-600" />
-                                  Nomor Pallet (Format Standar: KP-001 s/d seterusnya)
+                                  Nomor Pallet (Scan QR Pallet - Format KP-001)
                                 </label>
                                 <span className="text-[11px] text-slate-500">
-                                  Bisa dibaca langsung dengan <strong>Scanner Barcode Gun</strong> atau <strong>Kamera</strong> di atas, atau otomatis terisi.
+                                  Isian dikosongkan untuk di-scan via <strong>Scanner Gun</strong> / <strong>Kamera</strong> membaca QR pada pallet (tidak selalu harus urut).
                                 </span>
                               </div>
                               <div className="flex items-center gap-1.5">
@@ -1845,7 +1853,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                                   value={palletNumber}
                                   onChange={(e) => setPalletNumber(e.target.value.toUpperCase())}
                                   onBlur={(e) => setPalletNumber(formatToKpPallet(e.target.value))}
-                                  placeholder="Contoh: KP-001"
+                                  placeholder="Scan QR code pada pallet (format KP-001)..."
                                   className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-cyan-400 rounded-xl font-mono font-black text-lg sm:text-xl text-slate-900 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 uppercase placeholder:font-normal placeholder:text-slate-400 shadow-2xs"
                                 />
                                 <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs font-bold text-cyan-700 bg-cyan-100 px-2 py-1 rounded-md">
@@ -1860,7 +1868,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                               <div className="flex items-center gap-2">
                                 <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
                                 <span className="font-semibold">
-                                  Scanner & Kamera Siap Membaca: Tembak barcode nomor pallet (misal label <strong>KP-001</strong>) untuk auto-isi.
+                                  Scanner & Kamera Siap Membaca: Tembak barcode/QR pallet (format <strong>KP-001</strong>) untuk mengisi otomatis.
                                 </span>
                               </div>
                               <button
@@ -1947,25 +1955,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             </div>
                           </div>
 
-                          {/* Visual Stacked Carton Box Preview */}
-                          {isBoxCountValidOption1 && (
-                            <div className="p-3 bg-white border border-slate-200 rounded-xl space-y-2">
-                              <span className="text-[11px] font-bold text-slate-600 block">
-                                Preview Susunan {calculatedBoxCount} Box dalam Pallet:
-                              </span>
-                              <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                                {Array.from({ length: calculatedBoxCount }, (_, i) => cartonStart + i).map(cNum => (
-                                  <span
-                                    key={cNum}
-                                    className="px-2 py-0.5 bg-amber-50 border border-amber-200 text-amber-900 font-mono text-[10px] font-bold rounded"
-                                  >
-                                    D{String(cNum).padStart(3, '0')}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
                           <div className="pt-2">
                             <button
                               type="button"
@@ -2015,9 +2004,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             <input
                               type="text"
                               value={targetSlot}
-                              onChange={(e) => setTargetSlot(e.target.value.toUpperCase())}
+                              onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
+                              onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
                               placeholder="Contoh: A1a, F2b, A3m"
-                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black uppercase tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
+                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
                                 isTargetSlotBlocked 
                                   ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
                                   : 'border-slate-300 text-cyan-950 focus:border-cyan-500 focus:ring-cyan-100'
@@ -2039,19 +2029,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
                             {/* Quick Empty Slot Buttons */}
                             <div className="flex items-center gap-2 flex-wrap pt-1">
-                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready:</span>
+                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready (Huruf ke-3 kecil):</span>
                               {readyEmptySlots.map(sCode => (
                                 <button
                                   key={sCode}
                                   type="button"
-                                  onClick={() => setTargetSlot(sCode)}
+                                  onClick={() => setTargetSlot(formatSlotCodeProper(sCode))}
                                   className={`px-3 py-1.5 text-xs sm:text-sm font-mono font-bold rounded-xl transition cursor-pointer ${
-                                    targetSlot === sCode
+                                    targetSlot === formatSlotCodeProper(sCode)
                                       ? 'bg-cyan-600 text-white shadow-xs'
                                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                                   }`}
                                 >
-                                  {sCode}
+                                  {formatSlotCodeProper(sCode)}
                                 </button>
                               ))}
                             </div>
@@ -2415,9 +2405,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                             <input
                               type="text"
                               value={targetSlot}
-                              onChange={(e) => setTargetSlot(e.target.value.toUpperCase())}
+                              onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
+                              onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
                               placeholder="Contoh: A1a, F2b, A3m"
-                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black uppercase tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
+                              className={`w-full h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
                                 isTargetSlotBlocked 
                                   ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
                                   : 'border-slate-300 text-emerald-950 focus:border-emerald-500 focus:ring-emerald-100'
@@ -2439,19 +2430,19 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
                             {/* Quick Empty Slot Buttons */}
                             <div className="flex items-center gap-2 flex-wrap pt-1">
-                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready:</span>
+                              <span className="text-xs font-bold text-slate-600">Pilih Cepat Slot Ready (Huruf ke-3 kecil):</span>
                               {readyEmptySlots.map(sCode => (
                                 <button
                                   key={sCode}
                                   type="button"
-                                  onClick={() => setTargetSlot(sCode)}
+                                  onClick={() => setTargetSlot(formatSlotCodeProper(sCode))}
                                   className={`px-3 py-1.5 text-xs sm:text-sm font-mono font-bold rounded-xl transition cursor-pointer ${
-                                    targetSlot === sCode
+                                    targetSlot === formatSlotCodeProper(sCode)
                                       ? 'bg-emerald-600 text-white shadow-xs'
                                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-300'
                                   }`}
                                 >
-                                  {sCode}
+                                  {formatSlotCodeProper(sCode)}
                                 </button>
                               ))}
                             </div>
