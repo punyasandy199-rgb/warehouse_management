@@ -249,6 +249,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     cartonFormatted: string;
     productName: string;
     batchNo: string;
+    productionDate?: string;
+    productionTime?: string;
     rawCode: string;
     scannedAt: string;
   }>>([]);
@@ -276,9 +278,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   }, [putawayOption, scannedCartons, boxCount, cartonStart, cartonEnd]);
 
   // Logika status box kapasitas pallet:
-  // - 15 box: warna HIJAU tanda maks 15 box
-  // - Di bawah 15 box (dan min 2 box): warna KUNING tanda masih bisa diinput, minimal tetap 2 box
-  // - Di bawah 2 box: peringatan minimal 2 box
+  // - 15 box: warna HIJAU tanda maks 15 box (SOP Pallet Penuh)
+  // - Di bawah 15 box (dan min 1 box): warna KUNING tanda masih bisa diinput, minimal 1 box terpenuhi
   // - Di atas 15 box: warning warna MERAH dan TIDAK DAPAT terinput / masuk ke rak
   const boxCapacityInfo = React.useMemo(() => {
     if (effectiveBoxCount === 15) {
@@ -292,15 +293,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         hint: 'Kapasitas maksimal 15 Box terpenuhi. Pallet siap dialokasikan ke rak.',
         canSubmit: true,
       };
-    } else if (effectiveBoxCount >= 2 && effectiveBoxCount < 15) {
+    } else if (effectiveBoxCount >= 1 && effectiveBoxCount < 15) {
       return {
         status: 'UNDER_15',
         color: 'amber',
         badgeBg: 'bg-amber-100 border-amber-300 text-amber-800',
         cardBg: 'bg-amber-50/90 border-amber-300 text-amber-950',
         indicatorColor: 'bg-amber-500',
-        label: `${effectiveBoxCount} Box (Di Bawah 15 Box) - Masih Bisa Diinput`,
-        hint: `Kapasitas di bawah 15 box (minimal 2 box terpenuhi). Pallet masih dapat diinput ke rak.`,
+        label: `${effectiveBoxCount} Box (Di Bawah 15 Box) - Siap Disimpan`,
+        hint: `Kapasitas di bawah 15 box (minimal 1 box terpenuhi). Pallet siap dialokasikan ke rak.`,
         canSubmit: true,
       };
     } else if (effectiveBoxCount > 15) {
@@ -315,15 +316,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         canSubmit: false,
       };
     } else {
-      // effectiveBoxCount < 2
+      // effectiveBoxCount === 0
       return {
-        status: 'BELOW_MIN_2',
+        status: 'BELOW_MIN_1',
         color: 'slate',
         badgeBg: 'bg-slate-100 border-slate-300 text-slate-700',
         cardBg: 'bg-slate-50 border-slate-200 text-slate-700',
         indicatorColor: 'bg-slate-400',
-        label: `${effectiveBoxCount} Box - Belum Memenuhi Minimal 2 Box`,
-        hint: `Minimal tetap 2 Box per pallet untuk dapat masuk ke rak.`,
+        label: `0 Box - Belum Memenuhi Minimal 1 Box`,
+        hint: `Minimal 1 Box per pallet untuk dapat masuk ke rak.`,
         canSubmit: false,
       };
     }
@@ -774,9 +775,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       const properSlot = formatSlotCodeProper(matchedKey);
 
       if (mode === 'PUTAWAY') {
-        if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 2) {
+        if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 1) {
           soundManager.playScanError();
-          setOption2Notice(`⚠️ Harap selesaikan scan box terlebih dahulu (Minimal 2 s/d 15 box) sebelum scan Nomor Rak.`);
+          setOption2Notice(`⚠️ Harap scan minimal 1 box terlebih dahulu (Maksimal 15 box) sebelum scan Nomor Rak.`);
           return;
         }
         setTargetSlot(properSlot);
@@ -850,6 +851,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
             cartonFormatted: cartonFmt,
             productName: parsedFg.productName,
             batchNo: parsedFg.batchNo,
+            productionDate: parsedFg.productionDateFormatted || '30-06-2026',
+            productionTime: parsedFg.productionTimeFormatted || '14:35 WIB',
             rawCode: code,
             scannedAt: nowTime
           };
@@ -1044,7 +1047,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       if (effectiveBoxCount > 15) {
         alert(`PENEMPATAN DITOLAK: Pallet berisi ${effectiveBoxCount} Box (Melebihi batas maksimal 15 Box)! Tidak dapat terinput / masuk ke rak sesuai SOP.`);
       } else {
-        alert(`PENEMPATAN DITOLAK: Pallet berisi ${effectiveBoxCount} Box (Minimal tetap 2 Box per pallet). Harap sesuaikan jumlah box.`);
+        alert(`PENEMPATAN DITOLAK: Pallet berisi ${effectiveBoxCount} Box (Minimal 1 Box per pallet). Harap sesuaikan nomor box awal dan akhir.`);
       }
       return;
     }
@@ -1189,7 +1192,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const currentCount = scannedCartons.length;
     const baseCarton = parsedFgQr?.cartonNumber || 72;
     const nextCartonNum = baseCarton + currentCount;
-    const mockRawCode = `PA274/26-10022026-${String(nextCartonNum).padStart(3, '0')}-SIC25-122`;
+    const cFmt = `D${String(nextCartonNum).padStart(3, '0')}`;
+    const mockRawCode = `PA274/2612230062026${cFmt}14353006202630062028${String(nextCartonNum).padStart(3, '0')}`;
     handleBarcodeDetected(mockRawCode);
   };
 
@@ -1204,9 +1208,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       items.push({
         cartonNumber: cNum,
         cartonFormatted: cFmt,
-        productName: parsedFgQr?.productName || 'INSTANT COFFEE SIC 25 BR',
+        productName: parsedFgQr?.productName || 'SIC 25 BR (1 X 30 KG)',
         batchNo: parsedFgQr?.batchNo || '274/26',
-        rawCode: `PA274/26-10022026-${String(cNum).padStart(3, '0')}-SIC25-122`,
+        productionDate: parsedFgQr?.productionDateFormatted || '30-06-2026',
+        productionTime: parsedFgQr?.productionTimeFormatted || '14:35 WIB',
+        rawCode: `PA274/2612230062026${cFmt}14353006202630062028${String(cNum).padStart(3, '0')}`,
         scannedAt: nowTime
       });
     }
@@ -1650,7 +1656,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                         {lookupResult.parsedQr.productName}
                       </h4>
 
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs">
                         <div className="p-2 bg-white rounded-lg border border-cyan-100">
                           <span className="text-slate-400 block text-[10px]">PIN PRODUK</span>
                           <span className="font-bold text-slate-800">{lookupResult.parsedQr.productPin}</span>
@@ -1663,7 +1669,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                           <span className="text-slate-400 block text-[10px]">TGL PRODUKSI</span>
                           <span className="font-semibold text-slate-800">
                             {lookupResult.parsedQr.productionDateFormatted}
-                            {lookupResult.parsedQr.productionTimeFormatted ? ` (${lookupResult.parsedQr.productionTimeFormatted})` : ''}
+                          </span>
+                        </div>
+                        <div className="p-2 bg-white rounded-lg border border-cyan-200">
+                          <span className="text-emerald-700 block text-[10px] font-bold flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-emerald-600" />
+                            JAM PRODUKSI
+                          </span>
+                          <span className="font-mono font-black text-emerald-800">
+                            {lookupResult.parsedQr.productionTimeFormatted || '14:35 WIB'}
                           </span>
                         </div>
                         <div className="p-2 bg-white rounded-lg border border-cyan-100">

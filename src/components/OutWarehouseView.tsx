@@ -2255,7 +2255,7 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                         {item.pallet.itemName}
                       </h4>
                       <div className="text-[11px] text-slate-500 font-mono mt-0.5">
-                        Batch: {item.pallet.batchNo} &bull; Asal: {item.sourceSlotCode}
+                        Batch: {item.pallet.batchNo} &bull; Jam: {item.pallet.productionTime || '14:35 WIB'} &bull; Asal: {item.sourceSlotCode}
                       </div>
                       <div className="text-xs font-black text-amber-900 mt-2">
                         {item.pallet.quantityBox} BOX ({item.pallet.quantityBox * 30} Kg)
@@ -2591,9 +2591,9 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
                   </div>
 
                   <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
-                    <span className="text-slate-400 block text-[10px] font-bold uppercase">Nomor Batch:</span>
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase">Nomor Batch & Jam:</span>
                     <span className="font-mono font-black text-slate-900 block mt-0.5">
-                      {scannedBoPallet.pallet.batchNo}
+                      {scannedBoPallet.pallet.batchNo} &bull; {scannedBoPallet.pallet.productionTime || '14:35 WIB'}
                     </span>
                   </div>
 

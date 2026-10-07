@@ -158,10 +158,15 @@ export const InboundSummaryModal: React.FC<InboundSummaryModalProps> = ({
               </div>
 
               <div>
-                <span className="text-slate-400 block text-[11px] font-semibold">Tanggal & Waktu Produksi</span>
-                <span className="font-bold text-slate-900 flex items-center gap-1.5 font-mono">
+                <span className="text-slate-400 block text-[11px] font-semibold flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5 text-emerald-600" />
+                  Tanggal & Jam Produksi
+                </span>
+                <span className="font-bold text-slate-900 flex items-center gap-1.5 font-mono text-xs sm:text-sm">
                   <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                  {data.productionDate} • {data.productionTime || '14:35 WIB'}
+                  <span>{data.productionDate}</span>
+                  <span>&bull;</span>
+                  <span className="text-emerald-700 font-black">Jam {data.productionTime || '14:35 WIB'}</span>
                 </span>
               </div>
 

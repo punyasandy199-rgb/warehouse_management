@@ -23,7 +23,8 @@ import {
   ChevronRight,
   Eye,
   LayoutGrid,
-  List
+  List,
+  Clock
 } from 'lucide-react';
 import { RackData, RackSlot, UserRole } from '../types';
 
@@ -420,6 +421,10 @@ export const RackDetailModal: React.FC<RackDetailModalProps> = ({
                               <span className="font-bold text-slate-800 text-xs block" title={p.batchNo || '-'}>
                                 {p.batchNo || '-'}
                               </span>
+                              <span className="text-[10px] text-emerald-800 font-bold flex items-center gap-1" title="Jam Produksi">
+                                <Clock className="w-3 h-3 text-emerald-600 inline shrink-0" />
+                                {p.productionTime || '14:35 WIB'}
+                              </span>
                               <span className="text-[10px] text-slate-500 block" title={p.cartonRangeText || '-'}>
                                 {p.cartonRangeText || '-'}
                               </span>
@@ -547,6 +552,13 @@ export const RackDetailModal: React.FC<RackDetailModalProps> = ({
                         <div className="flex justify-between text-slate-600 text-[11px]">
                           <span>Batch:</span>
                           <span className="font-mono font-bold text-slate-800">{p.batchNo || '-'}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-600 text-[11px]">
+                          <span>Jam Prod:</span>
+                          <span className="font-mono font-bold text-emerald-800 flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-emerald-600 shrink-0" />
+                            {p.productionTime || '14:35 WIB'}
+                          </span>
                         </div>
                         <div className="flex justify-between text-slate-600 text-[11px]">
                           <span>Rentang:</span>

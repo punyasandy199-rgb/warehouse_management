@@ -444,6 +444,10 @@ export const RackVisualizer: React.FC<RackVisualizerProps> = ({
                           <span className="font-semibold text-slate-700">
                             {slot.pallet.quantityBox} Box ({slot.pallet.quantityBox * 30} Kg)
                           </span>
+                          <span aria-hidden="true" className="text-slate-300">·</span>
+                          <span className="text-emerald-700 font-semibold font-mono">
+                            Jam: {slot.pallet.productionTime || '14:35 WIB'}
+                          </span>
                           {slot.pallet.cartonRangeText && (
                             <>
                               <span aria-hidden="true" className="text-slate-300">·</span>

@@ -73,7 +73,7 @@ export const InWarehouseView: React.FC<InWarehouseViewProps> = ({
                 Opsi 1 (Rentang Box)
               </span>
               <span className="text-xs font-mono text-slate-500">
-                Maks 15 Box
+                Min 1 · Maks 15 Box
               </span>
             </div>
 
@@ -81,7 +81,7 @@ export const InWarehouseView: React.FC<InWarehouseViewProps> = ({
               Scan 1 QR Box FG & Input Range Karton
             </h3>
             <p className="text-xs text-slate-500 leading-relaxed">
-              Scan salah satu QR box produk, lalu tentukan rentang karton awal s/d akhir (contoh: D072 s/d D086).
+              Scan salah satu QR box produk, lalu tentukan rentang nomor box awal s/d akhir (contoh: D072 s/d D086).
             </p>
           </div>
 
@@ -104,7 +104,7 @@ export const InWarehouseView: React.FC<InWarehouseViewProps> = ({
                 Opsi 2 (Scan Per Box)
               </span>
               <span className="text-xs font-mono font-semibold text-emerald-700">
-                Min 2 · Maks 15 Box
+                Min 1 · Maks 15 Box
               </span>
             </div>
 

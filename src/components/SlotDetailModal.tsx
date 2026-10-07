@@ -9,6 +9,7 @@ import {
   Box, 
   Layers, 
   Calendar, 
+  Clock,
   User, 
   QrCode, 
   Barcode,
@@ -186,16 +187,25 @@ export const SlotDetailModal: React.FC<SlotDetailModalProps> = ({
                 </div>
               </div>
 
-              {/* Detail Metrics with DD-MM-YYYY Date Format */}
-              <div className="grid grid-cols-2 gap-3 text-xs font-medium text-slate-600 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              {/* Detail Metrics with DD-MM-YYYY Date Format & Jam Produksi */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-medium text-slate-600 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
                 <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs">
-                  <span className="text-slate-400 block text-[10px] font-bold tracking-wider">TGL PRODUKSI (DD-MM-YYYY)</span>
+                  <span className="text-slate-400 block text-[10px] font-bold tracking-wider">TGL PRODUKSI</span>
                   <span className="font-mono font-bold text-slate-900 text-sm">
                     {formatDateDDMMYYYY(slot.pallet.productionDate)}
                   </span>
                 </div>
                 <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs">
-                  <span className="text-slate-400 block text-[10px] font-bold tracking-wider">TGL KADALUARSA (DD-MM-YYYY)</span>
+                  <span className="text-slate-400 block text-[10px] font-bold tracking-wider flex items-center gap-1">
+                    <Clock className="w-3 h-3 text-emerald-600" />
+                    JAM PRODUKSI
+                  </span>
+                  <span className="font-mono font-bold text-emerald-800 text-sm">
+                    {slot.pallet.productionTime || '14:35 WIB'}
+                  </span>
+                </div>
+                <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs">
+                  <span className="text-slate-400 block text-[10px] font-bold tracking-wider">TGL KADALUARSA</span>
                   <span className="font-mono font-bold text-slate-900 text-sm">
                     {formatDateDDMMYYYY(slot.pallet.expiryDate)}
                   </span>
@@ -206,7 +216,7 @@ export const SlotDetailModal: React.FC<SlotDetailModalProps> = ({
                     {formatDateDDMMYYYY(slot.pallet.inboundDate)}
                   </span>
                 </div>
-                <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs">
+                <div className="bg-white p-2.5 rounded-xl border border-slate-100 shadow-2xs sm:col-span-2">
                   <span className="text-slate-400 block text-[10px] font-bold tracking-wider">OPERATOR INBOUND</span>
                   <span className="font-semibold text-slate-800 text-xs">
                     {slot.pallet.inboundBy || '-'}
