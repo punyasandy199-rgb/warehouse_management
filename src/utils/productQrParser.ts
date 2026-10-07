@@ -335,7 +335,17 @@ export function parseFinishedGoodsQrCode(rawInput: string): ParsedFinishedGoodsQ
     return result;
   }
 
-  // E. Fallback: If string contains keywords like PA274 or 274/26 or 122
+  // E. Standalone Carton Code: e.g. "D087", "D87", "D2", "BOX-2", "087"
+  const cartonCodeMatch = clean.match(/^(?:BOX-?|D)?(\d{1,4})$/i);
+  if (cartonCodeMatch) {
+    const cNum = parseInt(cartonCodeMatch[1], 10);
+    result.isValid = true;
+    result.cartonNumber = cNum;
+    result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
+    return result;
+  }
+
+  // F. Fallback: If string contains keywords like PA274 or 274/26 or 122
   if (clean.includes('274/26') || clean.includes('122') || clean.includes('275/26')) {
     result.isValid = true;
     const numMatch = clean.match(/D?(\d{2,3})/);

@@ -81,6 +81,7 @@ interface InboundSimplePutawayViewProps {
   onChangeBoxCount: (count: number) => void;
   onSetCartonRange: (start: number, end: number) => void;
   onUseSampleQr: () => void;
+  onScanCode?: (code: string) => void;
   onSubmit: () => void;
 }
 
@@ -115,9 +116,13 @@ export const InboundSimplePutawayView: React.FC<InboundSimplePutawayViewProps> =
   onChangeBoxCount,
   onSetCartonRange,
   onUseSampleQr,
+  onScanCode,
   onSubmit,
 }) => {
   const isOption2 = putawayOption === 'OPTION_2_SCAN_ALL';
+
+  // State untuk melacak input box manual jika diperlukan operator
+  const [manualBoxInput, setManualBoxInput] = useState('');
 
   // State untuk melacak apakah user sudah menyelesaikan scan box di Opsi 2 dan melangkah ke Nomor Pallet & Rak
   const [option2ProceededToPallet, setOption2ProceededToPallet] = useState(false);
@@ -631,6 +636,44 @@ export const InboundSimplePutawayView: React.FC<InboundSimplePutawayViewProps> =
               )}
             </div>
           </div>
+
+          {/* INPUT MANUAL / SCANNER GUN UNTUK STEP 1 OPSI 2 */}
+          {scannedCartons.length < 15 && (
+            <div className="flex items-center gap-2 pt-0.5">
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={manualBoxInput}
+                  onChange={(e) => setManualBoxInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && manualBoxInput.trim()) {
+                      e.preventDefault();
+                      if (onScanCode) {
+                        onScanCode(manualBoxInput.trim());
+                      }
+                      setManualBoxInput('');
+                    }
+                  }}
+                  placeholder="Scan barcode gun / ketik nomor karton (contoh: D086, D087, BOX-2) & Enter..."
+                  className="w-full h-10 px-3 bg-white border border-slate-300 rounded-lg font-mono font-bold text-xs text-slate-900 focus:border-slate-900 focus:ring-1 focus:ring-slate-900 placeholder:font-normal placeholder:text-slate-400"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (manualBoxInput.trim() && onScanCode) {
+                    onScanCode(manualBoxInput.trim());
+                    setManualBoxInput('');
+                  }
+                }}
+                disabled={!manualBoxInput.trim()}
+                className="h-10 px-3 rounded-lg bg-slate-900 hover:bg-black text-white font-bold text-xs disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer shrink-0 flex items-center gap-1.5"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Tambah Box</span>
+              </button>
+            </div>
+          )}
 
           {/* TOMBOL LANJUTKAN KE NOMOR PALLET & RAK JIKA SUDAH SCAN BOX (MIN 1 BOX) */}
           {scannedCartons.length >= 1 && (

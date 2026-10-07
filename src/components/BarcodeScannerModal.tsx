@@ -259,6 +259,23 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   const [putawaySuccess, setPutawaySuccess] = useState(false);
   const [scanTargetField, setScanTargetField] = useState<'product' | 'pallet' | 'rack' | null>(null);
 
+  const scannedCartonsRef = useRef(scannedCartons);
+  scannedCartonsRef.current = scannedCartons;
+
+  const putawayOptionRef = useRef(putawayOption);
+  putawayOptionRef.current = putawayOption;
+
+  const modeRef = useRef(mode);
+  modeRef.current = mode;
+
+  const scanTargetFieldRef = useRef(scanTargetField);
+  scanTargetFieldRef.current = scanTargetField;
+
+  const parsedFgQrRef = useRef(parsedFgQr);
+  parsedFgQrRef.current = parsedFgQr;
+
+  const handleBarcodeDetectedRef = useRef<(code: string) => void>(() => {});
+
   // Standar nomor pallet bebas sesuai dengan QR code pallet fisik (misal: FG-383, K-717, B-383, M-444, H-339, SM-123 dsb)
   const formatPalletCode = (val: string): string => {
     return (val || '').trim().toUpperCase();
@@ -341,6 +358,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       setCartonEnd(0);
       setBoxCount(0);
       setScannedCartons([]);
+      scannedCartonsRef.current = [];
       setOption2Notice(null);
       setScanTargetField(null);
       setPutawaySuccess(false);
@@ -616,10 +634,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           const barcodes = await detector.detect(video);
           if (barcodes && barcodes.length > 0 && barcodes[0].rawValue) {
             const rawVal = barcodes[0].rawValue.trim();
-            if (rawVal && (rawVal !== lastScannedCodeRef.current || now - lastScannedTimeRef.current > 1000)) {
+            const isDifferentCode = rawVal !== lastScannedCodeRef.current;
+            const isCooldownPassed = now - lastScannedTimeRef.current > 1200;
+            if (rawVal && (isDifferentCode || isCooldownPassed)) {
               lastScannedCodeRef.current = rawVal;
               lastScannedTimeRef.current = now;
-              handleBarcodeDetected(rawVal);
+              handleBarcodeDetectedRef.current(rawVal);
               isDetecting = false;
               return;
             }
@@ -670,10 +690,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
         if (code && code.data) {
           const rawVal = code.data.trim();
-          if (rawVal && (rawVal !== lastScannedCodeRef.current || now - lastScannedTimeRef.current > 1000)) {
+          const isDifferentCode = rawVal !== lastScannedCodeRef.current;
+          const isCooldownPassed = now - lastScannedTimeRef.current > 1200;
+          if (rawVal && (isDifferentCode || isCooldownPassed)) {
             lastScannedCodeRef.current = rawVal;
             lastScannedTimeRef.current = now;
-            handleBarcodeDetected(rawVal);
+            handleBarcodeDetectedRef.current(rawVal);
           }
         }
       } catch (qrErr) {
@@ -729,14 +751,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     setLastScannedResult(code);
     setScannedInput('');
 
-    // Clear deduplication after short cooldown so user can rescan anytime
-    setTimeout(() => {
-      lastScannedCodeRef.current = '';
-    }, 1200);
+    const currentMode = modeRef.current;
+    const currentOption = putawayOptionRef.current;
+    const currentTarget = scanTargetFieldRef.current;
+    const currentCartons = scannedCartonsRef.current;
 
-    // Jika sedang dalam mode PUTAWAY dan pengguna menekan tombol kamera khusus pada salah satu field
-    if (mode === 'PUTAWAY' && scanTargetField) {
-      if (scanTargetField === 'pallet') {
+    // ==============================================================
+    // A. PUTAWAY OPSI 2 (SCAN PER BOX BERUNTUN & MULTI-SCAN REAL-TIME)
+    // ==============================================================
+    if (currentMode === 'PUTAWAY' && currentOption === 'OPTION_2_SCAN_ALL') {
+      // 1. Jika operator secara khusus sedang membidik tombol "Scan Pallet"
+      if (currentTarget === 'pallet') {
         const cleanPallet = formatPalletCode(code);
         setPalletNumber(cleanPallet);
         setScanTargetField(null);
@@ -744,7 +769,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setOption2Notice(`✓ Nomor Pallet "${cleanPallet}" berhasil ter-scan!`);
         return;
       }
-      if (scanTargetField === 'rack') {
+
+      // 2. Jika operator secara khusus sedang membidik tombol "Scan Rak"
+      if (currentTarget === 'rack') {
         const properSlot = formatSlotCodeProper(code);
         setTargetSlot(properSlot);
         setScanTargetField(null);
@@ -752,14 +779,115 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil ter-scan!`);
         return;
       }
-      if (scanTargetField === 'product') {
-        if (mode === 'PUTAWAY' && putawayOption === 'OPTION_2_SCAN_ALL') {
-          // Jangan matikan kamera di Opsi 2, biarkan kamera terus aktif untuk scan box beruntun
-        } else {
-          setScanTargetField(null);
-          stopCamera();
-        }
-        // Lanjut ke pemrosesan produk di bawah
+
+      // 3. Hanya jika kode secara eksplisit diawali prefix "RAK-" dan bukan sedang membidik box produk
+      if (code.toUpperCase().startsWith('RAK-') && currentTarget !== 'product' && currentCartons.length >= 1) {
+        const properSlot = formatSlotCodeProper(code);
+        setTargetSlot(properSlot);
+        stopCamera();
+        setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil dipilih!`);
+        return;
+      }
+
+      // 4. Pengguna sedang memindai BOX PRODUK (Kamera on real-time)
+      if (currentCartons.length >= 15) {
+        soundManager.playScanError();
+        stopCamera();
+        setOption2Notice('⚠️ Kapasitas Pallet sudah mencapai batas maksimal 15 Box (Pallet Penuh Sesuai SOP)! Silakan lanjut ke Nomor Pallet & Nomor Rak.');
+        return;
+      }
+
+      // Parse data box dari QR Code
+      const parsedFg = parseFinishedGoodsQrCode(code);
+
+      // Cocokkan produk dengan master produk jika ada
+      const matchedProd = products.find(p => 
+        (parsedFg.productPin && (p.itemCode.includes(parsedFg.productPin) || p.barcode.includes(parsedFg.productPin))) ||
+        (parsedFg.productName && p.itemName.toLowerCase().includes(parsedFg.productName.toLowerCase())) ||
+        (parsedFg.productPin === '122' && (p.itemName.includes('SIC 25') || p.itemCode.includes('18')))
+      ) || products.find(p => p.itemCode === '00J.KPI18.K0307001XX') || products[0];
+
+      if (matchedProd) {
+        parsedFg.productName = matchedProd.itemName;
+      }
+
+      // Penentuan nomor karton yang menjamin list selalu bertambah:
+      // Jika nomor karton QR sudah ada di list (misal scan ulang label batch atau test barcode), 
+      // gunakan nomor karton berikutnya secara sekuensial agar list PASTI BERTAMBAH!
+      let cartonNum = parsedFg.cartonNumber;
+      if (!cartonNum || currentCartons.some(c => c.cartonNumber === cartonNum)) {
+        const maxExisting = currentCartons.length > 0
+          ? Math.max(...currentCartons.map(c => c.cartonNumber))
+          : (parsedFg.cartonNumber || 1);
+        cartonNum = maxExisting + 1;
+      }
+
+      const cartonPrefix = parsedFg.cartonPrefix || 'D';
+      const cartonFmt = `${cartonPrefix}${String(cartonNum).padStart(3, '0')}`;
+      const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const newBoxItem: ScannedCartonItem = {
+        cartonNumber: cartonNum,
+        cartonFormatted: cartonFmt,
+        productName: parsedFg.productName,
+        batchNo: parsedFg.batchNo,
+        productionDate: parsedFg.productionDateFormatted || '30-06-2026',
+        productionTime: parsedFg.productionTimeFormatted || '14:35 WIB',
+        rawCode: code,
+        scannedAt: nowTime
+      };
+
+      const nextCartons = [...currentCartons, newBoxItem];
+      scannedCartonsRef.current = nextCartons;
+      setScannedCartons(nextCartons);
+      setParsedFgQr(parsedFg);
+      setBoxCount(nextCartons.length);
+      setCartonEnd(cartonNum);
+      if (nextCartons.length === 1) {
+        setCartonStart(cartonNum);
+      }
+
+      soundManager.playScanSuccess();
+      const totalNow = nextCartons.length;
+      setScannedInput('');
+
+      if (totalNow === 15) {
+        // Box ke-15 tercapai: kamera otomatis menutup sesuai instruksi SOP
+        stopCamera();
+        setOption2Notice(`✓ Box ke-15 (${cartonFmt}) Masuk! Kapasitas Maksimal 15 Box Tercapai (Pallet Penuh Sesuai SOP). Kamera otomatis menutup. Silakan review list box di bawah, lalu input Nomor Pallet & Nomor Rak.`);
+      } else {
+        // Box 1 s/d 14: kamera TETAP ON terus menyala
+        setOption2Notice(`✓ Box ke-${totalNow} (${cartonFmt}) Masuk ke list! (${totalNow}/15 Box). Kamera tetap on, silakan terus scan box ke-${totalNow + 1} s/d box ke-15.`);
+      }
+
+      return;
+    }
+
+    // ==============================================================
+    // B. PUTAWAY OPSI 1 (RENTANG BOX) & MODE LAINNYA
+    // ==============================================================
+
+    // Jika pengguna menekan tombol kamera khusus pada salah satu field
+    if (currentMode === 'PUTAWAY' && currentTarget) {
+      if (currentTarget === 'pallet') {
+        const cleanPallet = formatPalletCode(code);
+        setPalletNumber(cleanPallet);
+        setScanTargetField(null);
+        stopCamera();
+        setOption2Notice(`✓ Nomor Pallet "${cleanPallet}" berhasil ter-scan!`);
+        return;
+      }
+      if (currentTarget === 'rack') {
+        const properSlot = formatSlotCodeProper(code);
+        setTargetSlot(properSlot);
+        setScanTargetField(null);
+        stopCamera();
+        setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil ter-scan!`);
+        return;
+      }
+      if (currentTarget === 'product') {
+        setScanTargetField(null);
+        stopCamera();
       }
     }
 
@@ -774,21 +902,16 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         : (slotParsed?.canonicalSlotCode || formatSlotCodeProper(code));
       const properSlot = formatSlotCodeProper(matchedKey);
 
-      if (mode === 'PUTAWAY') {
-        if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 1) {
-          soundManager.playScanError();
-          setOption2Notice(`⚠️ Harap scan minimal 1 box terlebih dahulu (Maksimal 15 box) sebelum scan Nomor Rak.`);
-          return;
-        }
+      if (currentMode === 'PUTAWAY') {
         setTargetSlot(properSlot);
-        stopCamera(); // Otomatis kamera langsung off saat selesai scan nomor rak
+        stopCamera();
         setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil dipilih!`);
         return;
-      } else if (mode === 'PICKING') {
+      } else if (currentMode === 'PICKING') {
         setPickingSlotCode(properSlot);
         stopCamera();
         return;
-      } else if (mode === 'AUDIT') {
+      } else if (currentMode === 'AUDIT') {
         setAuditSlotCode(properSlot);
         stopCamera();
         return;
@@ -821,74 +944,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         parsedFg.productName = matchedProd.itemName;
       }
 
-      // Auto-fill FG data
-      if (mode === 'PUTAWAY') {
-        if (putawayOption === 'OPTION_2_SCAN_ALL') {
-          // Validasi batas maksimal 15 box
-          if (scannedCartons.length >= 15) {
-            soundManager.playScanError();
-            setOption2Notice('⚠️ Kapasitas Pallet sudah mencapai batas maksimal 15 Box! Tidak dapat menambah box lagi (Pallet Penuh Sesuai SOP). Silakan review list box, atau hapus jika ada yang keliru.');
-            return;
-          }
-
-          const cartonNum = parsedFg.cartonNumber || (scannedCartons.length + 1);
-          const cartonFmt = parsedFg.cartonNumberFormatted || `D${String(cartonNum).padStart(3, '0')}`;
-
-          // Cek apakah barcode box ini sudah pernah di-scan (pencegahan duplikasi)
-          const isDuplicate = scannedCartons.some(c => 
-            c.rawCode === code || (parsedFg.cartonNumber && c.cartonNumber === parsedFg.cartonNumber)
-          );
-
-          if (isDuplicate) {
-            soundManager.playScanError();
-            setOption2Notice(`⚠️ Box "${cartonFmt}" sudah ada di dalam list (Duplikasi diabaikan). Silakan scan box lainnya.`);
-            return;
-          }
-
-          const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          const newBoxItem = {
-            cartonNumber: cartonNum,
-            cartonFormatted: cartonFmt,
-            productName: parsedFg.productName,
-            batchNo: parsedFg.batchNo,
-            productionDate: parsedFg.productionDateFormatted || '30-06-2026',
-            productionTime: parsedFg.productionTimeFormatted || '14:35 WIB',
-            rawCode: code,
-            scannedAt: nowTime
-          };
-
-          const nextCartons = [...scannedCartons, newBoxItem];
-          setScannedCartons(nextCartons);
-          setParsedFgQr(parsedFg);
-          setBoxCount(nextCartons.length);
-          setCartonEnd(cartonNum);
-          if (nextCartons.length === 1) {
-            setCartonStart(cartonNum);
-          }
-
-          // Bunyikan nada sukses
-          soundManager.playScanSuccess();
-          const totalNow = nextCartons.length;
-
-          // Kosongkan input dan kembalikan fokus ke kolom input scanner untuk tembakan scanner gun berikutnya
-          setScannedInput('');
-          setTimeout(() => {
-            scannerInputRef.current?.focus();
-          }, 50);
-
-          if (totalNow === 15) {
-            // Box ke-15 tercapai! Kamera otomatis menutup sendiri sesuai instruksi user
-            stopCamera();
-            setOption2Notice(`✓ Box ke-15 (${cartonFmt}) Masuk! Kapasitas Maksimal 15 Box Tercapai (Pallet Penuh Sesuai SOP). Kamera otomatis menutup. Silakan review list box di bawah, lalu input Nomor Pallet & Nomor Rak.`);
-          } else {
-            setOption2Notice(`✓ Box ke-${totalNow} (${cartonFmt}) Masuk ke list! (${totalNow}/15 Box). Kamera tetap on, silakan terus scan untuk input data box berikutnya.`);
-          }
-
-          // PENTING: Kamera tetap aktif agar operator dapat terus menembakkan scanner ke box selanjutnya tanpa jeda
-          return;
-        }
-
-        // Alur Opsi 1 (Rentang Box):
+      // Alur Opsi 1 (Rentang Box):
+      if (currentMode === 'PUTAWAY') {
         setParsedFgQr(parsedFg);
         setCartonEnd(parsedFg.cartonNumber || 86);
         setCartonStart(Math.max(1, (parsedFg.cartonNumber || 86) - 14));
@@ -897,7 +954,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         stopCamera();
         setOption2Notice(`✓ Produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil ter-scan!`);
         return;
-      } else if (mode === 'PICKING') {
+      } else if (currentMode === 'PICKING') {
         // Search if this batch is located in any rack slot
         for (const r of Object.values(racks)) {
           for (const s of Object.values(r.slots)) {
@@ -926,7 +983,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     );
 
     if (matchingProd) {
-      if (mode === 'PUTAWAY') {
+      if (currentMode === 'PUTAWAY') {
         stopCamera();
         const genericFg = parseFinishedGoodsQrCode(SAMPLE_FG_QR_CODE);
         genericFg.productName = matchingProd.itemName;
@@ -943,13 +1000,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
-    // 4. In PUTAWAY mode: setiap QR code lainnya (FG-383, K-717, B-383, M-444, H-339, SM-123 dsb) adalah Nomor Pallet
-    if (mode === 'PUTAWAY') {
-      if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 1) {
-        soundManager.playScanError();
-        setOption2Notice(`⚠️ Harap scan QR box produk ke-1 terlebih dahulu sebelum scan Nomor Pallet.`);
-        return;
-      }
+    // 4. In PUTAWAY mode Opsi 1: setiap QR code lainnya adalah Nomor Pallet
+    if (currentMode === 'PUTAWAY') {
       const cleanPallet = formatPalletCode(code);
       setPalletNumber(cleanPallet);
       stopCamera();
@@ -960,6 +1012,9 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     // 5. Default: Run general lookup
     doLookup(code);
   };
+
+  // Keep handleBarcodeDetectedRef always updated on every render
+  handleBarcodeDetectedRef.current = handleBarcodeDetected;
 
   const doLookup = (query: string) => {
     const q = query.trim().toUpperCase();
@@ -1157,9 +1212,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   // Handler untuk mengelola list box di Inbound Opsi 2 (Multi-scan)
   const handleRemoveScannedCarton = (index: number) => {
-    const removedItem = scannedCartons[index];
+    const removedItem = scannedCartonsRef.current[index];
     setScannedCartons(prev => {
       const next = prev.filter((_, i) => i !== index);
+      scannedCartonsRef.current = next;
       setBoxCount(next.length);
       return next;
     });
@@ -1173,6 +1229,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   const handleClearScannedCartons = () => {
     setScannedCartons([]);
+    scannedCartonsRef.current = [];
     setBoxCount(0);
     lastScannedCodeRef.current = '';
     soundManager.playScanSuccess();
@@ -1217,6 +1274,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       });
     }
     setScannedCartons(items);
+    scannedCartonsRef.current = items;
     setBoxCount(15);
     setCartonStart(baseCarton);
     setCartonEnd(baseCarton + 14);
@@ -1616,6 +1674,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                   setBoxCount(Math.max(1, end - start + 1));
                 }}
                 onUseSampleQr={() => handleBarcodeDetected(SAMPLE_FG_QR_CODE)}
+                onScanCode={handleBarcodeDetected}
                 onSubmit={handleFinalPutawaySubmit}
               />
             </div>
