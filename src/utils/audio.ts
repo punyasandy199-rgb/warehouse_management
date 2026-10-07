@@ -22,6 +22,13 @@ class SoundManager {
   }
 
   playScanSuccess() {
+    // Haptic vibration feedback for mobile / PDA scanner devices
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate([40, 30, 40]);
+      } catch {}
+    }
+
     try {
       const ctx = this.getContext();
       if (!ctx) return;
@@ -55,6 +62,12 @@ class SoundManager {
   }
 
   playScanError() {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      try {
+        navigator.vibrate([120, 60, 120]);
+      } catch {}
+    }
+
     try {
       const ctx = this.getContext();
       if (!ctx) return;

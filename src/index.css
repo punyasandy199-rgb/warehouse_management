@@ -1,1 +1,165 @@
 @import "tailwindcss";
+
+/* ========================================================================= */
+/* TRANSISI VISUAL: ZOOMING & SLIDING ANTAR MODUL WMS (60 FPS GPU-ACCELERATED)*/
+/* ========================================================================= */
+
+@keyframes viewZoomSlideEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(18px);
+    filter: blur(2px);
+  }
+  60% {
+    opacity: 0.95;
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px);
+  }
+}
+
+@keyframes viewZoomSlideReturn {
+  0% {
+    opacity: 0;
+    transform: scale(1.05) translateY(-14px);
+    filter: blur(2px);
+  }
+  60% {
+    opacity: 0.95;
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+    filter: blur(0px);
+  }
+}
+
+@keyframes viewSlideAcrossRight {
+  0% {
+    opacity: 0;
+    transform: translateX(24px) scale(0.98);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+@keyframes viewSlideAcrossLeft {
+  0% {
+    opacity: 0;
+    transform: translateX(-24px) scale(0.98);
+    filter: blur(2px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+    filter: blur(0px);
+  }
+}
+
+.animate-view-zoom-in-process {
+  animation: viewZoomSlideEnter 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity, filter;
+  transform-origin: center top;
+}
+
+.animate-view-zoom-return-dashboard {
+  animation: viewZoomSlideReturn 0.38s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity, filter;
+  transform-origin: center center;
+}
+
+.animate-view-slide-across {
+  animation: viewSlideAcrossRight 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity, filter;
+}
+
+.animate-view-slide-across-left {
+  animation: viewSlideAcrossLeft 0.34s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity, filter;
+}
+
+/* ========================================================================= */
+/* GOOGLE SIGN-IN OFFICIAL MATERIAL BUTTON STYLES                            */
+/* ========================================================================= */
+.gsi-material-button {
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+  appearance: none;
+  -moz-appearance: none;
+  -webkit-appearance: none;
+  background-color: #FFFFFF;
+  background-image: none;
+  border: 1px solid #747775;
+  border-radius: 20px;
+  box-sizing: border-box;
+  color: #1f1f1f;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: 'Roboto', arial, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  height: 40px;
+  letter-spacing: 0.25px;
+  outline: none;
+  overflow: hidden;
+  padding: 0 16px;
+  position: relative;
+  text-align: center;
+  transition: background-color .218s, border-color .218s, box-shadow .218s;
+  vertical-align: middle;
+  white-space: nowrap;
+  width: auto;
+  max-width: 400px;
+  min-width: min-content;
+  align-items: center;
+  justify-content: center;
+}
+
+.gsi-material-button:hover {
+  box-shadow: 0 1px 2px 0 rgba(60, 64, 67, .30), 0 1px 3px 1px rgba(60, 64, 67, .15);
+  background-color: #f8fafd;
+  border-color: #dadce0;
+}
+
+.gsi-material-button:active {
+  background-color: #eeeeee;
+  box-shadow: 0 1px 2px 0 rgba(60, 64, 67, .30);
+}
+
+.gsi-material-button .gsi-material-button-content-wrapper {
+  align-items: center;
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  height: 100%;
+  justify-content: space-between;
+  position: relative;
+  width: 100%;
+}
+
+.gsi-material-button .gsi-material-button-icon {
+  height: 20px;
+  margin-right: 12px;
+  min-width: 20px;
+  width: 20px;
+}
+
+.gsi-material-button .gsi-material-button-contents {
+  flex-grow: 1;
+  font-family: 'Roboto', arial, sans-serif;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+

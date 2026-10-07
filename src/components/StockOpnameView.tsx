@@ -884,43 +884,41 @@ export const StockOpnameView: React.FC<StockOpnameViewProps> = ({
   const isUserSpvOrSuperadmin = userRole === 'supervisor' || userRole === 'superadmin';
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300 max-w-7xl mx-auto pb-16">
+    <div className="space-y-4 animate-in fade-in duration-300 max-w-7xl mx-auto pb-16">
       
       {/* ========================================================================= */}
       {/* 1. HEADER SECTION & FLOW STEPPER                                          */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-xs">
-            <ClipboardCheck className="w-6 h-6" />
+      <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-amber-500 text-white flex items-center justify-center shrink-0">
+            <ClipboardCheck className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+              <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">
                 Sesi Stock Opname Barang Jadi (FGW)
               </h2>
-              {workflowStage === 'STAGE_4_APPROVED' ? (
-                <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-emerald-600" />
-                  Disetujui SPV & Selesai
-                </span>
-              ) : workflowStage === 'STAGE_3_WAITING_APPROVAL' ? (
-                <span className="bg-indigo-100 text-indigo-900 border border-indigo-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1 animate-pulse">
-                  <Lock className="w-3 h-3 text-indigo-600" />
-                  Menunggu Verifikasi SPV
-                </span>
-              ) : workflowStage === 'STAGE_2_RECONCILIATION' ? (
-                <span className="bg-purple-100 text-purple-900 border border-purple-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  Sesi 2: Koreksi Stok Sistem
-                </span>
-              ) : (
-                <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
-                  Sesi 1: Random Scan Fisik
-                </span>
-              )}
+              <span className={`text-xs font-mono font-semibold px-2 py-0.5 rounded ${
+                workflowStage === 'STAGE_4_APPROVED'
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : workflowStage === 'STAGE_3_WAITING_APPROVAL'
+                  ? 'bg-indigo-100 text-indigo-800'
+                  : workflowStage === 'STAGE_2_RECONCILIATION'
+                  ? 'bg-purple-100 text-purple-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}>
+                {workflowStage === 'STAGE_4_APPROVED'
+                  ? '✓ Disetujui SPV & Selesai'
+                  : workflowStage === 'STAGE_3_WAITING_APPROVAL'
+                  ? 'Menunggu Verifikasi SPV'
+                  : workflowStage === 'STAGE_2_RECONCILIATION'
+                  ? 'Sesi 2: Koreksi Stok'
+                  : 'Sesi 1: Random Scan Fisik'}
+              </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
-              Alur 3 Tahap: Sesi 1 Random Scan & Qty Real &rarr; Sesi 2 Investigasi & Koreksi Sistem &rarr; Verifikasi & Pengesahan SPV/Super Admin.
+            <p className="text-xs text-slate-500 mt-0.5">
+              Alur 3 Tahap: Sesi 1 Random Scan Fisik &rarr; Sesi 2 Investigasi & Koreksi Sistem &rarr; Pengesahan SPV/Super Admin.
             </p>
           </div>
         </div>
@@ -930,19 +928,19 @@ export const StockOpnameView: React.FC<StockOpnameViewProps> = ({
           {onOpenSOP && (
             <button
               onClick={onOpenSOP}
-              className="py-1.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+              className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
               title="Buka SOP Stock Opname & Flowchart"
             >
-              <BookOpen className="w-4 h-4 text-amber-700" />
+              <BookOpen className="w-3.5 h-3.5 text-slate-500" />
               <span>SOP & Alur</span>
             </button>
           )}
 
           <button
             onClick={() => setIsPrintBeritaAcaraOpen(true)}
-            className="py-1.5 px-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
+            className="py-1.5 px-3.5 rounded-lg bg-slate-900 hover:bg-black text-white text-xs font-bold flex items-center gap-1.5 transition shadow-xs cursor-pointer"
           >
-            <Printer className="w-4 h-4" />
+            <Printer className="w-3.5 h-3.5" />
             <span>Cetak Berita Acara</span>
           </button>
         </div>
@@ -951,48 +949,48 @@ export const StockOpnameView: React.FC<StockOpnameViewProps> = ({
       {/* ========================================================================= */}
       {/* 2. PROGRESS STEPPER: TAHAPAN OPERASIONAL STOCK OPNAME                     */}
       {/* ========================================================================= */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-xs">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="bg-white rounded-xl p-3 sm:p-4 border border-slate-200/90 shadow-xs">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
           
           {/* Step 1: Sesi 1 Random Scan */}
           <div 
             onClick={() => workflowStage !== 'STAGE_4_APPROVED' && setWorkflowStage('STAGE_1_RANDOM_SCAN')}
-            className={`p-3.5 rounded-xl border-2 transition cursor-pointer flex items-center gap-3 ${
+            className={`p-3 rounded-lg border transition cursor-pointer flex items-center gap-3 ${
               workflowStage === 'STAGE_1_RANDOM_SCAN'
-                ? 'border-amber-500 bg-amber-50/70 text-amber-950 shadow-xs'
-                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                ? 'border-amber-400 bg-amber-50/70 text-amber-950 shadow-xs'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
             }`}
           >
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm shrink-0 ${
-              workflowStage === 'STAGE_1_RANDOM_SCAN' ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'
+            <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-xs shrink-0 ${
+              workflowStage === 'STAGE_1_RANDOM_SCAN' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'
             }`}>
               1
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-xs uppercase tracking-wider text-slate-500">Sesi 1 Opname</div>
-              <div className="font-black text-sm text-slate-900 truncate">Random Scan & Qty Real</div>
-              <div className="text-[11px] text-slate-500 truncate">Scan acak beberapa area rak & input fisik</div>
+              <div className="font-semibold text-xs text-slate-500">Sesi 1 Opname</div>
+              <div className="font-bold text-sm text-slate-900 truncate">Random Scan & Qty Real</div>
+              <div className="text-xs text-slate-400 truncate">Scan acak rak & verifikasi kuantitas fisik</div>
             </div>
           </div>
 
           {/* Step 2: Sesi 2 Investigasi & Koreksi Sistem */}
           <div 
             onClick={() => workflowStage !== 'STAGE_4_APPROVED' && setWorkflowStage('STAGE_2_RECONCILIATION')}
-            className={`p-3.5 rounded-xl border-2 transition cursor-pointer flex items-center gap-3 ${
+            className={`p-3 rounded-lg border transition cursor-pointer flex items-center gap-3 ${
               workflowStage === 'STAGE_2_RECONCILIATION'
-                ? 'border-purple-500 bg-purple-50/70 text-purple-950 shadow-xs'
-                : 'border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300'
+                ? 'border-purple-400 bg-purple-50/70 text-purple-950 shadow-xs'
+                : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300'
             }`}
           >
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm shrink-0 ${
-              workflowStage === 'STAGE_2_RECONCILIATION' ? 'bg-purple-600 text-white' : 'bg-slate-200 text-slate-700'
+            <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-xs shrink-0 ${
+              workflowStage === 'STAGE_2_RECONCILIATION' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600'
             }`}>
               2
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-xs uppercase tracking-wider text-slate-500">Sesi 2 Opname</div>
-              <div className="font-black text-sm text-slate-900 truncate">Investigasi & Koreksi Sistem</div>
-              <div className="text-[11px] text-slate-500 truncate">Cari produk nyasar & betulkan data stok</div>
+              <div className="font-semibold text-xs text-slate-500">Sesi 2 Opname</div>
+              <div className="font-bold text-sm text-slate-900 truncate">Investigasi & Koreksi Sistem</div>
+              <div className="text-xs text-slate-400 truncate">Cari produk nyasar & betulkan data stok</div>
             </div>
           </div>
 
@@ -1003,29 +1001,29 @@ export const StockOpnameView: React.FC<StockOpnameViewProps> = ({
                 setWorkflowStage(workflowStage === 'STAGE_4_APPROVED' ? 'STAGE_4_APPROVED' : 'STAGE_3_WAITING_APPROVAL');
               }
             }}
-            className={`p-3.5 rounded-xl border-2 transition cursor-pointer flex items-center gap-3 ${
+            className={`p-3 rounded-lg border transition cursor-pointer flex items-center gap-3 ${
               workflowStage === 'STAGE_4_APPROVED'
-                ? 'border-emerald-500 bg-emerald-50/70 text-emerald-950 shadow-xs'
+                ? 'border-emerald-400 bg-emerald-50/70 text-emerald-950 shadow-xs'
                 : workflowStage === 'STAGE_3_WAITING_APPROVAL'
-                ? 'border-indigo-500 bg-indigo-50/70 text-indigo-950 shadow-xs'
-                : 'border-slate-200 bg-slate-50 text-slate-400'
+                ? 'border-indigo-400 bg-indigo-50/70 text-indigo-950 shadow-xs'
+                : 'border-slate-200 bg-white text-slate-400'
             }`}
           >
-            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black text-sm shrink-0 ${
+            <div className={`w-7 h-7 rounded flex items-center justify-center font-bold text-xs shrink-0 ${
               workflowStage === 'STAGE_4_APPROVED' 
                 ? 'bg-emerald-600 text-white' 
                 : workflowStage === 'STAGE_3_WAITING_APPROVAL' 
                 ? 'bg-indigo-600 text-white' 
-                : 'bg-slate-200 text-slate-400'
+                : 'bg-slate-100 text-slate-400'
             }`}>
-              {workflowStage === 'STAGE_4_APPROVED' ? <Check className="w-5 h-5" /> : '3'}
+              {workflowStage === 'STAGE_4_APPROVED' ? <Check className="w-4 h-4" /> : '3'}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="font-bold text-xs uppercase tracking-wider text-slate-500">Tahap Akhir</div>
-              <div className="font-black text-sm text-slate-900 truncate">
+              <div className="font-semibold text-xs text-slate-500">Tahap Akhir</div>
+              <div className="font-bold text-sm text-slate-900 truncate">
                 {workflowStage === 'STAGE_4_APPROVED' ? 'Telah Disahkan SPV' : 'Verifikasi SPV / Super Admin'}
               </div>
-              <div className="text-[11px] text-slate-500 truncate">Hasil sesuai 100% & pengesahan resmi</div>
+              <div className="text-xs text-slate-400 truncate">Hasil sesuai 100% & berita acara resmi</div>
             </div>
           </div>
 

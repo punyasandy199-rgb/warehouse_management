@@ -36,6 +36,7 @@ import { soundManager } from '../utils/audio';
 import { parseSlotCode, findMatchingSlotKey, formatSlotCodeProper, formatSlotInput } from '../utils/barcode';
 import { parseFinishedGoodsQrCode, ParsedFinishedGoodsQr, SAMPLE_FG_QR_CODE, formatIsoDate, formatDdMmYyyy } from '../utils/productQrParser';
 import { InboundSummaryModal } from './InboundSummaryModal';
+import { InboundSimplePutawayView, ScannedCartonItem } from './InboundSimplePutawayView';
 
 export type ScannerMode = 'PUTAWAY' | 'PICKING' | 'AUDIT' | 'LOOKUP';
 
@@ -236,9 +237,10 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
   }, [initialPutawayOption, isOpen]);
   const [putawayStep, setPutawayStep] = useState<1 | 2 | 3>(1);
   const [parsedFgQr, setParsedFgQr] = useState<ParsedFinishedGoodsQr | null>(null);
-  const [cartonStart, setCartonStart] = useState<number>(72);
-  const [cartonEnd, setCartonEnd] = useState<number>(86);
-  // Pallet number is left empty by default as user will scan pallet QR code (not always sequential)
+  // Pastikan isian semua kosong awalnya sesuai permintaan user
+  const [cartonStart, setCartonStart] = useState<number>(0);
+  const [cartonEnd, setCartonEnd] = useState<number>(0);
+  const [boxCount, setBoxCount] = useState<number>(0);
   const [palletNumber, setPalletNumber] = useState<string>('');
   const [operatorNote, setOperatorNote] = useState<string>('');
   const [icStatus, setIcStatus] = useState<ICStatus>('OK');
@@ -251,40 +253,103 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     scannedAt: string;
   }>>([]);
   const [option2Notice, setOption2Notice] = useState<string | null>(null);
-  const [targetSlot, setTargetSlot] = useState(prefilledSlotCode ? formatSlotCodeProper(prefilledSlotCode) : 'A1a');
+  const [targetSlot, setTargetSlot] = useState(prefilledSlotCode ? formatSlotCodeProper(prefilledSlotCode) : '');
   const [putawaySuccess, setPutawaySuccess] = useState(false);
+  const [scanTargetField, setScanTargetField] = useState<'product' | 'pallet' | 'rack' | null>(null);
 
-  // Helper to ensure Pallet Number adheres to "KP-001" format
-  const formatToKpPallet = (val: string): string => {
-    const clean = (val || '').trim().toUpperCase();
-    if (!clean) return '';
-    const numMatch = clean.match(/(\d+)/);
-    if (numMatch) {
-      const num = parseInt(numMatch[1], 10);
-      return `KP-${String(num).padStart(3, '0')}`;
-    }
-    return clean.startsWith('KP-') ? clean : `KP-${clean}`;
+  // Standar nomor pallet bebas sesuai dengan QR code pallet fisik (misal: FG-383, K-717, B-383, M-444, H-339, SM-123 dsb)
+  const formatPalletCode = (val: string): string => {
+    return (val || '').trim().toUpperCase();
   };
 
-  // Quick increment for consecutive pallets (KP-001 -> KP-002, etc.)
-  const handleIncrementPalletNumber = () => {
-    const match = palletNumber.match(/KP-?(\d+)/i);
-    if (match) {
-      const current = parseInt(match[1], 10);
-      setPalletNumber(`KP-${String(current + 1).padStart(3, '0')}`);
+  // Hitung jumlah box aktif pada pallet
+  const effectiveBoxCount = React.useMemo(() => {
+    if (putawayOption === 'OPTION_2_SCAN_ALL') {
+      return scannedCartons.length;
+    }
+    if (boxCount > 0) return boxCount;
+    if (cartonEnd > 0 && cartonStart > 0 && cartonEnd >= cartonStart) {
+      return cartonEnd - cartonStart + 1;
+    }
+    if (scannedCartons.length > 0) return scannedCartons.length;
+    return 0;
+  }, [putawayOption, scannedCartons, boxCount, cartonStart, cartonEnd]);
+
+  // Logika status box kapasitas pallet:
+  // - 15 box: warna HIJAU tanda maks 15 box
+  // - Di bawah 15 box (dan min 2 box): warna KUNING tanda masih bisa diinput, minimal tetap 2 box
+  // - Di bawah 2 box: peringatan minimal 2 box
+  // - Di atas 15 box: warning warna MERAH dan TIDAK DAPAT terinput / masuk ke rak
+  const boxCapacityInfo = React.useMemo(() => {
+    if (effectiveBoxCount === 15) {
+      return {
+        status: 'MAX_15',
+        color: 'emerald',
+        badgeBg: 'bg-emerald-100 border-emerald-300 text-emerald-800',
+        cardBg: 'bg-emerald-50/90 border-emerald-300 text-emerald-950',
+        indicatorColor: 'bg-emerald-500',
+        label: 'Maks 15 Box (Pallet Penuh Sesuai SOP)',
+        hint: 'Kapasitas maksimal 15 Box terpenuhi. Pallet siap dialokasikan ke rak.',
+        canSubmit: true,
+      };
+    } else if (effectiveBoxCount >= 2 && effectiveBoxCount < 15) {
+      return {
+        status: 'UNDER_15',
+        color: 'amber',
+        badgeBg: 'bg-amber-100 border-amber-300 text-amber-800',
+        cardBg: 'bg-amber-50/90 border-amber-300 text-amber-950',
+        indicatorColor: 'bg-amber-500',
+        label: `${effectiveBoxCount} Box (Di Bawah 15 Box) - Masih Bisa Diinput`,
+        hint: `Kapasitas di bawah 15 box (minimal 2 box terpenuhi). Pallet masih dapat diinput ke rak.`,
+        canSubmit: true,
+      };
+    } else if (effectiveBoxCount > 15) {
+      return {
+        status: 'OVER_15',
+        color: 'rose',
+        badgeBg: 'bg-rose-100 border-rose-400 text-rose-900 font-black animate-pulse',
+        cardBg: 'bg-rose-50 border-rose-300 text-rose-950',
+        indicatorColor: 'bg-rose-600',
+        label: `${effectiveBoxCount} Box - WARNING: Melebihi Batas Maksimal 15 Box!`,
+        hint: `PERINGATAN: Muatan melebihi batas maksimal 15 Box! Tidak dapat terinput / masuk ke rak.`,
+        canSubmit: false,
+      };
     } else {
-      setPalletNumber(getNextKpPalletNumber(racks));
+      // effectiveBoxCount < 2
+      return {
+        status: 'BELOW_MIN_2',
+        color: 'slate',
+        badgeBg: 'bg-slate-100 border-slate-300 text-slate-700',
+        cardBg: 'bg-slate-50 border-slate-200 text-slate-700',
+        indicatorColor: 'bg-slate-400',
+        label: `${effectiveBoxCount} Box - Belum Memenuhi Minimal 2 Box`,
+        hint: `Minimal tetap 2 Box per pallet untuk dapat masuk ke rak.`,
+        canSubmit: false,
+      };
     }
-    soundManager.playScanSuccess();
-  };
+  }, [effectiveBoxCount]);
 
-  // Reset icStatus and keep palletNumber empty when modal is opened (waiting for pallet QR scan)
+  // Reset semua isian menjadi KOSONG saat modal dibuka untuk memastikan awal selalu bersih
   useEffect(() => {
     if (isOpen) {
       setIcStatus('OK');
-      setPalletNumber(''); // Kosongkan saja sesuai instruksi user
+      setPalletNumber('');
+      setOperatorNote('');
+      setParsedFgQr(null);
+      setCartonStart(0);
+      setCartonEnd(0);
+      setBoxCount(0);
+      setScannedCartons([]);
+      setOption2Notice(null);
+      setScanTargetField(null);
+      setPutawaySuccess(false);
+      if (prefilledSlotCode) {
+        setTargetSlot(formatSlotCodeProper(prefilledSlotCode));
+      } else {
+        setTargetSlot('');
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, prefilledSlotCode]);
 
   // Lookup result state
   const [lookupResult, setLookupResult] = useState<{
@@ -350,18 +415,36 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
   // File input ref for direct photo capture / file scan on mobile devices
   const photoInputRef = useRef<HTMLInputElement | null>(null);
+  const scannerInputRef = useRef<HTMLInputElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const lastScannedTimeRef = useRef<number>(0);
   const lastScannedCodeRef = useRef<string>('');
   const scannerGunBufferRef = useRef<string>('');
   const lastKeyTimeRef = useRef<number>(0);
 
-  // Start Camera with robust fallback (back camera -> any camera)
+  // Start Camera with robust fallback (back camera -> any camera -> graceful notice)
   const startCamera = async () => {
     setCameraError(null);
     try {
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('Fitur live video stream kamera tidak didukung di peramban ini. Anda dapat menggunakan tombol "Ambil Foto Barcode" di bawah.');
+        setCameraError('Fitur live video stream kamera tidak didukung di browser ini. Silakan gunakan Scanner Gun Fisik (HID), input manual barcode, atau tombol "Ambil Foto Barcode".');
+        setCameraActive(false);
+        return;
+      }
+
+      // Check if any video input device exists on this system first
+      if (navigator.mediaDevices.enumerateDevices) {
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoInputs = devices.filter(d => d.kind === 'videoinput');
+          if (devices.length > 0 && videoInputs.length === 0) {
+            setCameraError('Perangkat kamera tidak terdeteksi pada sistem ini. Anda tetap dapat menggunakan Scanner Gun Fisik (HID), input manual barcode, atau tombol Ambil Foto.');
+            setCameraActive(false);
+            return;
+          }
+        } catch {
+          // ignore device enumeration errors
+        }
       }
 
       let stream: MediaStream | null = null;
@@ -384,13 +467,15 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               video: true
             });
           } catch (e3) {
-            console.warn('All camera constraints failed:', e3);
+            console.warn('Camera stream request fallback note:', e3);
           }
         }
       }
 
       if (!stream) {
-        throw new Error('Tidak dapat menemukan perangkat kamera.');
+        setCameraError('Kamera tidak terdeteksi pada perangkat ini. Silakan gunakan Scanner Gun Fisik (HID), input manual barcode, atau tombol Ambil Foto.');
+        setCameraActive(false);
+        return;
       }
 
       streamRef.current = stream;
@@ -403,12 +488,12 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         });
       }
     } catch (err: any) {
-      console.error('Camera access error:', err);
-      let errMsg = err.message || 'Gagal mengakses kamera.';
-      if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      console.warn('Camera access unavailable:', err?.message || err);
+      let errMsg = err?.message || 'Gagal mengakses kamera.';
+      if (err?.name === 'NotAllowedError' || err?.name === 'PermissionDeniedError') {
         errMsg = 'Izin kamera ditolak. Harap klik ikon gembok / setelan di bilah alamat browser HP Anda dan aktifkan izin Kamera.';
-      } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-        errMsg = 'Kamera tidak terdeteksi pada perangkat ini.';
+      } else if (err?.name === 'NotFoundError' || err?.name === 'DevicesNotFoundError' || String(err?.message || '').toLowerCase().includes('perangkat') || String(err?.message || '').toLowerCase().includes('not found')) {
+        errMsg = 'Kamera tidak terdeteksi pada perangkat ini. Anda dapat menggunakan Scanner Gun Fisik (HID), input manual barcode, atau unggah foto.';
       }
       setCameraError(errMsg);
       setCameraActive(false);
@@ -443,10 +528,17 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       } else {
         stopCamera();
       }
-    }
-    return () => {
+      // Auto-focus barcode input for instant hardware scanner gun typing
+      const focusTimer = setTimeout(() => {
+        scannerInputRef.current?.focus();
+      }, 150);
+      return () => {
+        clearTimeout(focusTimer);
+        stopCamera();
+      };
+    } else {
       stopCamera();
-    };
+    }
   }, [isOpen, isCameraEnabled]);
 
   // Global Hardware Scanner Gun (HID Keyboard Wedge) Listener
@@ -641,6 +733,35 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       lastScannedCodeRef.current = '';
     }, 1200);
 
+    // Jika sedang dalam mode PUTAWAY dan pengguna menekan tombol kamera khusus pada salah satu field
+    if (mode === 'PUTAWAY' && scanTargetField) {
+      if (scanTargetField === 'pallet') {
+        const cleanPallet = formatPalletCode(code);
+        setPalletNumber(cleanPallet);
+        setScanTargetField(null);
+        stopCamera();
+        setOption2Notice(`✓ Nomor Pallet "${cleanPallet}" berhasil ter-scan!`);
+        return;
+      }
+      if (scanTargetField === 'rack') {
+        const properSlot = formatSlotCodeProper(code);
+        setTargetSlot(properSlot);
+        setScanTargetField(null);
+        stopCamera();
+        setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil ter-scan!`);
+        return;
+      }
+      if (scanTargetField === 'product') {
+        if (mode === 'PUTAWAY' && putawayOption === 'OPTION_2_SCAN_ALL') {
+          // Jangan matikan kamera di Opsi 2, biarkan kamera terus aktif untuk scan box beruntun
+        } else {
+          setScanTargetField(null);
+          stopCamera();
+        }
+        // Lanjut ke pemrosesan produk di bawah
+      }
+    }
+
     // 1. Check if it's a Slot Code (e.g. A1a, F2b, RAK-A1a, etc.)
     const slotParsed = parseSlotCode(code);
     const isSlotPattern = !!slotParsed || /^RAK/i.test(code) || /^[A-Za-z]\d{1,2}[a-z]?$/i.test(code);
@@ -653,22 +774,14 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       const properSlot = formatSlotCodeProper(matchedKey);
 
       if (mode === 'PUTAWAY') {
-        setTargetSlot(properSlot);
-        stopCamera(); // Otomatis kamera langsung off saat selesai scan
-        if (putawayOption === 'OPTION_1_RANGE') {
-          if (parsedFgQr) {
-            // Product already scanned, advance to step 3 so rack is ready to confirm
-            setPutawayStep(3);
-          } else {
-            setOption2Notice(`Slot ${properSlot} telah dipilih. Sekarang scan barcode QR Box FG.`);
-          }
-        } else {
-          if (scannedCartons.length >= 2) {
-            setPutawayStep(2);
-          } else {
-            setOption2Notice(`Slot ${properSlot} tersimpan. Selesaikan scan minimal 2 karton box terlebih dahulu.`);
-          }
+        if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 2) {
+          soundManager.playScanError();
+          setOption2Notice(`⚠️ Harap selesaikan scan box terlebih dahulu (Minimal 2 s/d 15 box) sebelum scan Nomor Rak.`);
+          return;
         }
+        setTargetSlot(properSlot);
+        stopCamera(); // Otomatis kamera langsung off saat selesai scan nomor rak
+        setOption2Notice(`✓ Nomor Rak "${properSlot}" berhasil dipilih!`);
         return;
       } else if (mode === 'PICKING') {
         setPickingSlotCode(properSlot);
@@ -682,41 +795,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         doLookup(properSlot);
         stopCamera();
         return;
-      }
-    }
-
-    // 1. Check if it's a Pallet Number (format: KP-001 s/d seterusnya, KPxxx, or PLT-...)
-    const isPalletMatch = /^(?:KP|PALLET|PLT)[-_ ]?(\d+)/i.test(code) ||
-      /^KP[-_ ]?\d+/i.test(code) ||
-      /^KP\d+/i.test(code) ||
-      /PALLET[-_ ]?(\d+)/i.test(code);
-    if (isPalletMatch) {
-      let normalizedPallet = code.toUpperCase();
-      const numMatch = code.match(/(\d+)/);
-      if (numMatch) {
-        const num = parseInt(numMatch[1], 10);
-        normalizedPallet = `KP-${String(num).padStart(3, '0')}`;
-      }
-
-      if (mode === 'PUTAWAY') {
-        setPalletNumber(normalizedPallet);
-        stopCamera(); // Otomatis kamera langsung off saat selesai scan
-        setOption2Notice(`✓ Nomor Pallet ${normalizedPallet} berhasil terbaca dari scanner/kamera!`);
-        return;
-      } else if (mode === 'PICKING') {
-        for (const r of Object.values(racks)) {
-          for (const s of Object.values(r.slots)) {
-            if (s.pallet && (
-              s.pallet.palletNumber?.toUpperCase() === normalizedPallet ||
-              s.pallet.palletId?.toUpperCase() === normalizedPallet ||
-              s.pallet.palletNumber?.toUpperCase() === code.toUpperCase()
-            )) {
-              setPickingSlotCode(s.slotCode);
-              stopCamera();
-              return;
-            }
-          }
-        }
       }
     }
 
@@ -742,51 +820,80 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         parsedFg.productName = matchedProd.itemName;
       }
 
-      // Auto-fill all FG data
-      setParsedFgQr(parsedFg);
-      setCartonEnd(parsedFg.cartonNumber);
-      setCartonStart(Math.max(1, parsedFg.cartonNumber - 14));
-      
-      // Catatan: isian nomor pallet dibiarkan kosong agar operator scan QR pada pallet
-      setOperatorNote(`Verified QR FG ${parsedFg.productName} • Batch ${parsedFg.batchNo} (${parsedFg.cartonNumberFormatted})`);
-
+      // Auto-fill FG data
       if (mode === 'PUTAWAY') {
-        if (putawayOption === 'OPTION_1_RANGE') {
-          // Otomatis kamera langsung off dan lanjut ke langkah selanjutnya (Langkah 2)
-          stopCamera();
-          setPutawayStep(2);
-          setOption2Notice(`✓ Detail produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil terinput! Silakan atur range box & scan nomor pallet.`);
-          return;
-        } else {
-          // OPTION 2: SCAN ALL QR CARTONS (MIN 2, MAX 15)
-          if (putawayStep === 1) {
-            const already = scannedCartons.some(c => c.cartonNumber === parsedFg.cartonNumber);
-            if (already) {
-              soundManager.playScanError();
-              setOption2Notice(`Karton ${parsedFg.cartonNumberFormatted} sudah ada di daftar pallet!`);
-              return;
-            }
-
-            if (scannedCartons.length >= 15) {
-              soundManager.playScanError();
-              setOption2Notice('Maksimal 15 box dalam 1 pallet telah tercapai!');
-              return;
-            }
-
-            const newCarton = {
-              cartonNumber: parsedFg.cartonNumber,
-              cartonFormatted: parsedFg.cartonNumberFormatted,
-              productName: parsedFg.productName,
-              batchNo: parsedFg.batchNo,
-              rawCode: code,
-              scannedAt: new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-            };
-
-            setScannedCartons(prev => [...prev, newCarton]);
-            setOption2Notice(`Karton ${parsedFg.cartonNumberFormatted} berhasil ditambahkan! (${scannedCartons.length + 1}/15 Box)`);
+        if (putawayOption === 'OPTION_2_SCAN_ALL') {
+          // Validasi batas maksimal 15 box
+          if (scannedCartons.length >= 15) {
+            soundManager.playScanError();
+            setOption2Notice('⚠️ Kapasitas Pallet sudah mencapai batas maksimal 15 Box! Tidak dapat menambah box lagi (Pallet Penuh Sesuai SOP). Silakan review list box, atau hapus jika ada yang keliru.');
             return;
           }
+
+          const cartonNum = parsedFg.cartonNumber || (scannedCartons.length + 1);
+          const cartonFmt = parsedFg.cartonNumberFormatted || `D${String(cartonNum).padStart(3, '0')}`;
+
+          // Cek apakah barcode box ini sudah pernah di-scan (pencegahan duplikasi)
+          const isDuplicate = scannedCartons.some(c => 
+            c.rawCode === code || (parsedFg.cartonNumber && c.cartonNumber === parsedFg.cartonNumber)
+          );
+
+          if (isDuplicate) {
+            soundManager.playScanError();
+            setOption2Notice(`⚠️ Box "${cartonFmt}" sudah ada di dalam list (Duplikasi diabaikan). Silakan scan box lainnya.`);
+            return;
+          }
+
+          const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          const newBoxItem = {
+            cartonNumber: cartonNum,
+            cartonFormatted: cartonFmt,
+            productName: parsedFg.productName,
+            batchNo: parsedFg.batchNo,
+            rawCode: code,
+            scannedAt: nowTime
+          };
+
+          const nextCartons = [...scannedCartons, newBoxItem];
+          setScannedCartons(nextCartons);
+          setParsedFgQr(parsedFg);
+          setBoxCount(nextCartons.length);
+          setCartonEnd(cartonNum);
+          if (nextCartons.length === 1) {
+            setCartonStart(cartonNum);
+          }
+
+          // Bunyikan nada sukses
+          soundManager.playScanSuccess();
+          const totalNow = nextCartons.length;
+
+          // Kosongkan input dan kembalikan fokus ke kolom input scanner untuk tembakan scanner gun berikutnya
+          setScannedInput('');
+          setTimeout(() => {
+            scannerInputRef.current?.focus();
+          }, 50);
+
+          if (totalNow === 15) {
+            // Box ke-15 tercapai! Kamera otomatis menutup sendiri sesuai instruksi user
+            stopCamera();
+            setOption2Notice(`✓ Box ke-15 (${cartonFmt}) Masuk! Kapasitas Maksimal 15 Box Tercapai (Pallet Penuh Sesuai SOP). Kamera otomatis menutup. Silakan review list box di bawah, lalu input Nomor Pallet & Nomor Rak.`);
+          } else {
+            setOption2Notice(`✓ Box ke-${totalNow} (${cartonFmt}) Masuk ke list! (${totalNow}/15 Box). Kamera tetap on, silakan terus scan untuk input data box berikutnya.`);
+          }
+
+          // PENTING: Kamera tetap aktif agar operator dapat terus menembakkan scanner ke box selanjutnya tanpa jeda
+          return;
         }
+
+        // Alur Opsi 1 (Rentang Box):
+        setParsedFgQr(parsedFg);
+        setCartonEnd(parsedFg.cartonNumber || 86);
+        setCartonStart(Math.max(1, (parsedFg.cartonNumber || 86) - 14));
+        setBoxCount(15);
+        setOperatorNote(`Verified QR FG ${parsedFg.productName} • Batch ${parsedFg.batchNo} (${parsedFg.cartonNumberFormatted})`);
+        stopCamera();
+        setOption2Notice(`✓ Produk ${parsedFg.productName} (Batch ${parsedFg.batchNo}) berhasil ter-scan!`);
+        return;
       } else if (mode === 'PICKING') {
         // Search if this batch is located in any rack slot
         for (const r of Object.values(racks)) {
@@ -824,9 +931,8 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
         setParsedFgQr(genericFg);
         setCartonStart(1);
         setCartonEnd(Math.min(15, matchingProd.boxPerPallet || 15));
-        setPalletNumber(''); // Kosongkan saja sesuai instruksi user (diisi lewat scan pallet)
-        setPutawayStep(2);
-        setOption2Notice(`✓ Produk ${matchingProd.itemName} terinput! Silakan tentukan range box & scan nomor pallet.`);
+        setBoxCount(Math.min(15, matchingProd.boxPerPallet || 15));
+        setOption2Notice(`✓ Produk ${matchingProd.itemName} terinput!`);
         return;
       } else {
         doLookup(matchingProd.itemCode);
@@ -834,7 +940,21 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       }
     }
 
-    // 4. Default: Run general lookup
+    // 4. In PUTAWAY mode: setiap QR code lainnya (FG-383, K-717, B-383, M-444, H-339, SM-123 dsb) adalah Nomor Pallet
+    if (mode === 'PUTAWAY') {
+      if (putawayOption === 'OPTION_2_SCAN_ALL' && scannedCartons.length < 1) {
+        soundManager.playScanError();
+        setOption2Notice(`⚠️ Harap scan QR box produk ke-1 terlebih dahulu sebelum scan Nomor Pallet.`);
+        return;
+      }
+      const cleanPallet = formatPalletCode(code);
+      setPalletNumber(cleanPallet);
+      stopCamera();
+      setOption2Notice(`✓ Nomor Pallet "${cleanPallet}" berhasil ter-scan!`);
+      return;
+    }
+
+    // 5. Default: Run general lookup
     doLookup(code);
   };
 
@@ -911,24 +1031,28 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     }
   };
 
-  // Calculate carton quantity and validation for both options
-  const boxCountOption1 = Math.max(0, cartonEnd - cartonStart + 1);
-  const isBoxCountValidOption1 = boxCountOption1 > 0 && boxCountOption1 <= 15;
-
-  const boxCountOption2 = scannedCartons.length;
-  const isBoxCountValidOption2 = boxCountOption2 >= 2 && boxCountOption2 <= 15;
-
-  const calculatedBoxCount = putawayOption === 'OPTION_1_RANGE' ? boxCountOption1 : boxCountOption2;
-  const isBoxCountValid = putawayOption === 'OPTION_1_RANGE' ? isBoxCountValidOption1 : isBoxCountValidOption2;
-
   // Submit Putaway
   const handleFinalPutawaySubmit = () => {
-    if (!targetSlot || !parsedFgQr || !isBoxCountValid) return;
+    if (!targetSlot || !parsedFgQr) {
+      soundManager.playScanError();
+      alert('Harap lengkapi scan Produk IC, Nomor Pallet, dan Nomor Rak!');
+      return;
+    }
 
-    const cleanPallet = (palletNumber || '').trim();
+    if (!boxCapacityInfo.canSubmit) {
+      soundManager.playScanError();
+      if (effectiveBoxCount > 15) {
+        alert(`PENEMPATAN DITOLAK: Pallet berisi ${effectiveBoxCount} Box (Melebihi batas maksimal 15 Box)! Tidak dapat terinput / masuk ke rak sesuai SOP.`);
+      } else {
+        alert(`PENEMPATAN DITOLAK: Pallet berisi ${effectiveBoxCount} Box (Minimal tetap 2 Box per pallet). Harap sesuaikan jumlah box.`);
+      }
+      return;
+    }
+
+    const cleanPallet = formatPalletCode(palletNumber);
     if (!cleanPallet) {
       soundManager.playScanError();
-      alert('Harap scan atau isi Nomor Pallet (format KP-001 s/d seterusnya) sebelum konfirmasi simpan!');
+      alert('Harap scan atau isi Nomor Pallet fisik sebelum konfirmasi simpan!');
       return;
     }
 
@@ -953,33 +1077,30 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
       ? formatIsoDate(parsedFgQr.bestBeforeRaw) 
       : '2028-06-30';
 
-    const cartonRangeStr = putawayOption === 'OPTION_1_RANGE'
-      ? `D${String(cartonStart).padStart(3, '0')} - D${String(cartonEnd).padStart(3, '0')} (${calculatedBoxCount} Box)`
-      : `${scannedCartons.length} Box (${scannedCartons.map(c => `D${String(c.cartonNumber).padStart(3, '0')}`).join(', ')})`;
+    const cartonRangeStr = cartonStart > 0 && cartonEnd > 0
+      ? `D${String(cartonStart).padStart(3, '0')} - D${String(cartonEnd).padStart(3, '0')} (${effectiveBoxCount} Box)`
+      : `${effectiveBoxCount} Box`;
 
-    const defaultNote = putawayOption === 'OPTION_1_RANGE'
-      ? `Putaway Opsi 1 (scan-range) (Range D${cartonStart}-D${cartonEnd}) oleh ${currentUserName}`
-      : `Putaway Opsi 2 (scan allbox) (${scannedCartons.length} Karton ter-scan) oleh ${currentUserName}`;
-
+    const defaultNote = `Inbound Pallet ${cleanPallet} (${effectiveBoxCount} Box) oleh ${currentUserName}`;
     const finalNotes = operatorNote.trim() ? `${operatorNote.trim()} | ${defaultNote}` : defaultNote;
 
     onExecutePutaway(properSlot, {
       itemCode: matchedProduct.itemCode,
       itemName: parsedFgQr.productName || matchedProduct.itemName,
-      quantityBox: calculatedBoxCount,
+      quantityBox: effectiveBoxCount,
       batchNo: parsedFgQr.batchNo,
       packingLine: parsedFgQr.packingLine,
       productPin: parsedFgQr.productPin,
-      cartonStart: putawayOption === 'OPTION_1_RANGE' ? cartonStart : undefined,
-      cartonEnd: putawayOption === 'OPTION_1_RANGE' ? cartonEnd : undefined,
+      cartonStart: cartonStart > 0 ? cartonStart : undefined,
+      cartonEnd: cartonEnd > 0 ? cartonEnd : undefined,
       cartonRangeText: cartonRangeStr,
-      scannedCartons: putawayOption === 'OPTION_2_SCAN_ALL' ? scannedCartons : undefined,
+      scannedCartons: scannedCartons.length > 0 ? scannedCartons.map(c => c.cartonFormatted) : undefined,
       productionDate: prodDateIso,
       productionTime: parsedFgQr.productionTimeFormatted || '14:35 WIB',
       expiryDate: expiryDateIso,
       rawQrCode: parsedFgQr.rawString || SAMPLE_FG_QR_CODE,
-      palletNumber: formatToKpPallet(palletNumber),
-      rackingOption: putawayOption === 'OPTION_1_RANGE' ? 'RANGE' : 'MULTI_SCAN',
+      palletNumber: cleanPallet,
+      rackingOption: putawayOption === 'OPTION_2_SCAN_ALL' ? 'MULTI_SCAN' : 'RANGE',
       icStatus: icStatus,
       notes: finalNotes
     });
@@ -987,11 +1108,11 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     const inbNotif: InboundNotification = {
       id: `INB-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       type: 'INBOUND_SUCCESS',
-      palletNumber: formatToKpPallet(palletNumber),
+      palletNumber: cleanPallet,
       itemName: parsedFgQr.productName || matchedProduct.itemName,
       itemCode: matchedProduct.itemCode,
       batchNo: parsedFgQr.batchNo,
-      quantityBox: calculatedBoxCount,
+      quantityBox: effectiveBoxCount,
       cartonRangeText: cartonRangeStr,
       productionDate: parsedFgQr.productionDateFormatted || prodDateIso,
       productionTime: parsedFgQr.productionTimeFormatted || '14:35 WIB',
@@ -1029,6 +1150,76 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
     onExecuteAudit(auditSlotCode, isMatch);
     setAuditStatus(isMatch ? 'MATCH' : 'MISMATCH');
     soundManager.playScanSuccess();
+  };
+
+  // Handler untuk mengelola list box di Inbound Opsi 2 (Multi-scan)
+  const handleRemoveScannedCarton = (index: number) => {
+    const removedItem = scannedCartons[index];
+    setScannedCartons(prev => {
+      const next = prev.filter((_, i) => i !== index);
+      setBoxCount(next.length);
+      return next;
+    });
+    lastScannedCodeRef.current = '';
+    soundManager.playScanSuccess();
+    setOption2Notice(`✓ Box "${removedItem?.cartonFormatted || `#${index + 1}`}" berhasil dihapus dari list. Anda dapat melakukan scan kembali box pengganti yang benar.`);
+    setTimeout(() => {
+      scannerInputRef.current?.focus();
+    }, 50);
+  };
+
+  const handleClearScannedCartons = () => {
+    setScannedCartons([]);
+    setBoxCount(0);
+    lastScannedCodeRef.current = '';
+    soundManager.playScanSuccess();
+    setOption2Notice('List box telah direset. Silakan mulai scan kembali dari Box ke-1.');
+    setTimeout(() => {
+      scannerInputRef.current?.focus();
+    }, 50);
+  };
+
+  // Simulasi scan box berikutnya secara berurutan untuk kemudahan testing tanpa scanner fisik
+  const handleSimulateScanNextBox = () => {
+    if (scannedCartons.length >= 15) {
+      soundManager.playScanError();
+      setOption2Notice('⚠️ Kapasitas maksimal 15 Box sudah terpenuhi!');
+      return;
+    }
+    const currentCount = scannedCartons.length;
+    const baseCarton = parsedFgQr?.cartonNumber || 72;
+    const nextCartonNum = baseCarton + currentCount;
+    const mockRawCode = `PA274/26-10022026-${String(nextCartonNum).padStart(3, '0')}-SIC25-122`;
+    handleBarcodeDetected(mockRawCode);
+  };
+
+  // Simulasi isi penuh 15 box secara instan untuk kemudahan testing
+  const handleSimulateFill15Boxes = () => {
+    const baseCarton = parsedFgQr?.cartonNumber || 72;
+    const items: ScannedCartonItem[] = [];
+    const nowTime = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    for (let i = 0; i < 15; i++) {
+      const cNum = baseCarton + i;
+      const cFmt = `D${String(cNum).padStart(3, '0')}`;
+      items.push({
+        cartonNumber: cNum,
+        cartonFormatted: cFmt,
+        productName: parsedFgQr?.productName || 'INSTANT COFFEE SIC 25 BR',
+        batchNo: parsedFgQr?.batchNo || '274/26',
+        rawCode: `PA274/26-10022026-${String(cNum).padStart(3, '0')}-SIC25-122`,
+        scannedAt: nowTime
+      });
+    }
+    setScannedCartons(items);
+    setBoxCount(15);
+    setCartonStart(baseCarton);
+    setCartonEnd(baseCarton + 14);
+    if (!parsedFgQr) {
+      const parsed = parseFinishedGoodsQrCode(SAMPLE_FG_QR_CODE);
+      setParsedFgQr(parsed);
+    }
+    soundManager.playScanSuccess();
+    setOption2Notice('✓ Simulasi: 15 Box Berhasil Dimasukkan Lengkap (Pallet Penuh)! Silakan periksa daftar box, lalu isi Nomor Pallet & Nomor Rak.');
   };
 
   if (!isOpen) return null;
@@ -1166,6 +1357,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
           <div className="flex gap-2">
             <div className="relative flex-1">
               <input
+                ref={scannerInputRef}
                 data-scanner-input="true"
                 type="text"
                 value={scannedInput}
@@ -1173,15 +1365,7 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
                 onKeyDown={handleKeyDown}
                 placeholder={
                   mode === 'PUTAWAY'
-                    ? putawayOption === 'OPTION_1_RANGE'
-                      ? putawayStep === 1
-                        ? 'Tembak scanner gun ke QR Box FG (atau ketik & Enter)...'
-                        : putawayStep === 2
-                        ? 'Tembak scanner gun / kamera ke Barcode Pallet (format KP-001) atau QR Rak...'
-                        : 'Tembak scanner gun ke QR Rak fisik (contoh: RAK-A-P1)...'
-                      : putawayStep === 1
-                      ? `Tembak scanner gun ke QR karton box ke-${scannedCartons.length + 1}...`
-                      : 'Tembak scanner gun ke QR Rak fisik (contoh: RAK-A-P1)...'
+                    ? 'Scan QR Produk IC / No. Pallet / No. Rak (atau ketik & Enter)...'
                     : MODE_CONFIGS[mode]?.inputPlaceholder || 'Arahkan scanner gun / ketik barcode & Enter...'
                 }
                 autoFocus
@@ -1243,28 +1427,6 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
               </>
             )}
           </div>
-
-          {/* Banner Mode Scanner Gun jika Akses Kamera OFF oleh Super Admin */}
-          {!isCameraEnabled && (
-            <div className="flex items-center justify-between p-3 bg-slate-900 text-white border border-slate-800 rounded-xl text-xs shadow-xs">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0">
-                  <Scan className="w-4 h-4" />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-bold text-white">Mode Scanner Gun Fisik Aktif</span>
-                    <span className="text-[10px] bg-amber-500/20 text-amber-300 font-bold px-2 py-0.5 rounded-full border border-amber-500/30">
-                      Akses Kamera OFF (Super Admin)
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-slate-400">
-                    Gunakan alat Scanner Barcode Gun (USB / Bluetooth) atau ketik manual untuk membaca kode.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* Quick Activation Bar if Camera is Inactive and Camera is Allowed */}
           {isCameraEnabled && !cameraActive && (
@@ -1382,1287 +1544,74 @@ export const BarcodeScannerModal: React.FC<BarcodeScannerModalProps> = ({
 
         {/* Modal Scrollable Workspace */}
         <div className="p-5 overflow-y-auto flex-1 bg-slate-50/50">
-          {/* ================= MODE: PUTAWAY (2 PILIHAN METODE RACKING) ================= */}
+          {/* ================= MODE: PUTAWAY (TAMPILAN INBOUND SIMPLE & TERSTRUKTUR) ================= */}
           {mode === 'PUTAWAY' && (
             <div className="space-y-4">
-              {putawaySuccess ? (
-                <div className="p-6 bg-emerald-50 border border-emerald-200 rounded-2xl text-center space-y-3">
-                  <div className="w-14 h-14 rounded-full bg-emerald-500 text-white flex items-center justify-center mx-auto shadow-md">
-                    <Check className="w-8 h-8 stroke-[3]" />
+              {option2Notice && (
+                <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-xl flex items-center justify-between text-xs text-emerald-950 font-bold animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>{option2Notice}</span>
                   </div>
-                  <h3 className="text-xl font-black text-emerald-900">
-                    Pallet Berhasil Disimpan ke Rak!
-                  </h3>
-                  <div className="p-4 bg-white rounded-xl border border-emerald-200 max-w-lg mx-auto text-left text-xs space-y-1.5 text-slate-700">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Nomor Pallet:</span>
-                      <span className="font-mono font-bold text-slate-900">{palletNumber}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Metode:</span>
-                      <span className="font-semibold text-emerald-800">
-                        {putawayOption === 'OPTION_1_RANGE' ? 'Opsi 1: Range Karton' : 'Opsi 2: Scan Semua Karton'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Produk:</span>
-                      <span className="font-bold text-slate-900">{parsedFgQr?.productName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Jumlah:</span>
-                      <span className="font-bold text-slate-900">{calculatedBoxCount} BOX (Maks 15)</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Tanggal Produksi:</span>
-                      <span className="font-mono font-bold text-slate-900">
-                        {parsedFgQr?.productionDateFormatted || '-'}
-                        {parsedFgQr?.productionTimeFormatted ? ` (${parsedFgQr.productionTimeFormatted})` : ''}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Best Before / Exp:</span>
-                      <span className="font-mono font-bold text-emerald-700">
-                        {parsedFgQr?.bestBeforeFormatted || '-'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Lokasi Slot Rak:</span>
-                      <span className="font-mono font-bold text-cyan-800">{targetSlot}</span>
-                    </div>
-                    {operatorNote && (
-                      <div className="pt-1 border-t border-slate-100 flex justify-between">
-                        <span className="text-slate-400">Catatan Operator:</span>
-                        <span className="italic text-slate-600">{operatorNote}</span>
-                      </div>
-                    )}
-                  </div>
-                  <div className="pt-2 flex items-center justify-center gap-3">
-                    <button
-                      onClick={() => {
-                        setPutawaySuccess(false);
-                        setPutawayStep(1);
-                        setScannedCartons([]);
-                        setOperatorNote('');
-                        setPalletNumber(''); // Kosongkan saja untuk diisi via scan pallet
-                      }}
-                      className="px-4 py-2 bg-emerald-600 text-white text-xs font-bold rounded-xl shadow hover:bg-emerald-700 transition cursor-pointer"
-                    >
-                      Input Pallet Lainnya
-                    </button>
-                    <button
-                      onClick={onClose}
-                      className="px-4 py-2 bg-white text-slate-700 border border-slate-300 text-xs font-bold rounded-xl hover:bg-slate-100 transition cursor-pointer"
-                    >
-                      Selesai & Tutup
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOption2Notice(null)}
+                    className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer font-bold"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-              ) : (
-                <>
-                  {/* Banner Metode Terpilih (Sesuai Pilihan pada Halaman Luar) */}
-                  <div className="bg-white px-4 py-3 rounded-2xl border border-slate-200 shadow-xs flex items-center justify-between flex-wrap gap-2.5">
-                    <div className="flex items-center gap-3">
-                      <span className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 text-white shadow-2xs ${
-                        putawayOption === 'OPTION_1_RANGE' ? 'bg-cyan-600' : 'bg-emerald-600'
-                      }`}>
-                        {putawayOption === 'OPTION_1_RANGE' ? <Hash className="w-3.5 h-3.5" /> : <Layers className="w-3.5 h-3.5" />}
-                        {putawayOption === 'OPTION_1_RANGE' ? 'Metode: Opsi 1 (scan-range)' : 'Metode: Opsi 2 (scan allbox)'}
-                      </span>
-                      <span className="text-xs font-bold text-slate-700">
-                        {putawayOption === 'OPTION_1_RANGE'
-                          ? 'Scan 1 QR Box FG, tentukan rentang no. karton (maks 15 box) & scan slot rak'
-                          : 'Scan barcode semua karton satu per satu (min 2, maks 15 box) & scan slot rak'}
-                      </span>
-                    </div>
-                    <span className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200">
-                      Maks 15 Box
-                    </span>
-                  </div>
-
-                  {/* Universal Scan Notification Banner */}
-                  {option2Notice && (
-                    <div className="p-3.5 bg-emerald-50 border-2 border-emerald-400 rounded-2xl flex items-center justify-between text-xs text-emerald-950 font-bold shadow-xs animate-in fade-in duration-150">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                        <span>{option2Notice}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setOption2Notice(null)}
-                        className="text-slate-400 hover:text-slate-700 p-1 cursor-pointer"
-                        title="Tutup pesan"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  )}
-
-                  {/* ============================================================== */}
-                  {/* OPSI 1: SCAN 1 QR + INPUT RANGE CARTON + NO PALLET + SCAN RAK */}
-                  {/* ============================================================== */}
-                  {putawayOption === 'OPTION_1_RANGE' && (
-                    <>
-                      {/* Step Progress Header Opsi 1 */}
-                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-                        <div className="flex items-center justify-between text-xs font-bold">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                              putawayStep === 1 ? 'bg-cyan-600 text-white' : 'bg-emerald-100 text-emerald-800'
-                            }`}>
-                              1
-                            </span>
-                            <span className={putawayStep === 1 ? 'text-cyan-900 font-extrabold' : 'text-slate-500'}>
-                              Scan 1 QR Box FG
-                            </span>
-                          </div>
-                          <ArrowRight className="w-4 h-4 text-slate-300" />
-                          <div className="flex items-center gap-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                              putawayStep === 2 ? 'bg-cyan-600 text-white' : putawayStep > 2 ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              2
-                            </span>
-                            <span className={putawayStep === 2 ? 'text-cyan-900 font-extrabold' : 'text-slate-500'}>
-                              Range Karton & No Pallet
-                            </span>
-                          </div>
-                          <ArrowRight className="w-4 h-4 text-slate-300" />
-                          <div className="flex items-center gap-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                              putawayStep === 3 ? 'bg-cyan-600 text-white' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              3
-                            </span>
-                            <span className={putawayStep === 3 ? 'text-cyan-900 font-extrabold' : 'text-slate-500'}>
-                              Scan QR Rak & Simpan
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* STEP 1: SCAN PRODUCT QR */}
-                      {putawayStep === 1 && (
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <QrCode className="w-4 h-4 text-cyan-600" />
-                                Langkah 1: Scan QR Code Salah Satu Box di Pallet
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Sistem otomatis mengurai Packing Line, Nomor Batch, PIN Produk, Tanggal & Jam Produksi.
-                              </p>
-                            </div>
-                            <span className="text-[11px] font-bold bg-cyan-50 text-cyan-800 border border-cyan-200 px-2 py-0.5 rounded-md">
-                              Maks 15 Box / Pallet
-                            </span>
-                          </div>
-
-                          {/* Quick Sample Button */}
-                          <div className="p-3 bg-cyan-50/60 rounded-xl border border-cyan-100 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-                            <div className="text-xs text-cyan-950 flex items-center gap-2">
-                              <Scan className="w-4 h-4 text-cyan-700 shrink-0" />
-                              <div>
-                                <span className="font-bold block">Scan barcode fisik otomatis masuk ke kolom input pemindai di atas.</span>
-                                <span className="text-[11px] text-slate-500">Atau uji coba sistem langsung dengan contoh label:</span>
-                              </div>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleBarcodeDetected(SAMPLE_FG_QR_CODE)}
-                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs rounded-lg transition cursor-pointer shrink-0 shadow-xs"
-                            >
-                              Gunakan Contoh QR
-                            </button>
-                          </div>
-
-                          {!parsedFgQr && (
-                            <div className="p-8 text-center bg-slate-50/80 rounded-2xl border-2 border-dashed border-slate-300 space-y-3">
-                              <div className="w-14 h-14 mx-auto rounded-2xl bg-cyan-100 text-cyan-700 flex items-center justify-center shadow-xs">
-                                <Scan className="w-7 h-7" />
-                              </div>
-                              <div>
-                                <h5 className="font-black text-slate-900 text-base">
-                                  Menunggu Pembacaan QR Code Box Produk FG
-                                </h5>
-                                <p className="text-xs text-slate-500 max-w-md mx-auto mt-1 leading-relaxed">
-                                  Arahkan <strong>Scanner Barcode Gun</strong> ke QR label box atau aktifkan <strong>Kamera HP</strong> di atas. Setelah barcode terbaca, detail produk otomatis terisi dan langsung diarahkan ke Langkah 2 (Input Range Box & Nomor Pallet KP-001).
-                                </p>
-                              </div>
-                            </div>
-                          )}
-
-                          {parsedFgQr && (
-                            <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                              <div className="flex items-center justify-between border-b border-slate-200 pb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="bg-emerald-600 text-white text-[11px] font-mono font-bold px-2 py-0.5 rounded">
-                                    {parsedFgQr.packingLineName}
-                                  </span>
-                                  <span className="text-xs font-bold text-slate-800">
-                                    Batch: {parsedFgQr.batchNo} ({parsedFgQr.batchYear})
-                                  </span>
-                                </div>
-                                <span className="text-xs font-bold text-cyan-700">
-                                  PIN #{parsedFgQr.productPin}
-                                </span>
-                              </div>
-
-                              <h4 className="font-extrabold text-slate-900 text-base">
-                                {parsedFgQr.productName}
-                              </h4>
-
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                                <div>
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Karton Terbaca</span>
-                                  <span className="font-mono font-bold text-slate-800">{parsedFgQr.cartonNumberFormatted}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Waktu Produksi</span>
-                                  <span className="font-semibold text-slate-800">{parsedFgQr.productionTimeFormatted}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Tgl Produksi</span>
-                                  <span className="font-semibold text-slate-800">{parsedFgQr.productionDateFormatted}</span>
-                                </div>
-                                <div>
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Best Before</span>
-                                  <span className="font-semibold text-slate-800">{parsedFgQr.bestBeforeFormatted}</span>
-                                </div>
-                              </div>
-
-                              <div className="pt-2">
-                                <button
-                                  type="button"
-                                  onClick={() => setPutawayStep(2)}
-                                  className="w-full py-2.5 bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center justify-center gap-2"
-                                >
-                                  <span>Lanjut: Input Range Karton (Langkah 2)</span>
-                                  <ArrowRight className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {/* STEP 2: INPUT CARTON RANGE + PALLET NUMBER + NOTE */}
-                      {putawayStep === 2 && (
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <Hash className="w-4 h-4 text-cyan-600" />
-                                Langkah 2: Detail Produk, Rentang Nomor Karton & Nomor Pallet (KP-001)
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Detail produk terisi otomatis dari scan QR. Tentukan rentang box (maks 15 box) dan scan / input nomor pallet (format KP-001 s/d seterusnya).
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setPutawayStep(1)}
-                              className="text-xs font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
-                            >
-                              <ArrowLeft className="w-3.5 h-3.5" />
-                              <span>Scan Ulang Box</span>
-                            </button>
-                          </div>
-
-                          {/* Card Detail Produk Terinput (Hasil Scan QR Code Inbound) */}
-                          {parsedFgQr && (
-                            <div className="p-4 bg-gradient-to-r from-emerald-50 via-teal-50 to-cyan-50 rounded-2xl border-2 border-emerald-300 shadow-xs space-y-3">
-                              <div className="flex items-center justify-between border-b border-emerald-200/80 pb-2 flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="bg-emerald-600 text-white text-[11px] font-mono font-black px-2.5 py-0.5 rounded-lg shadow-2xs">
-                                    {parsedFgQr.packingLineName}
-                                  </span>
-                                  <span className="text-xs font-black text-slate-800">
-                                    Batch: {parsedFgQr.batchNo} ({parsedFgQr.batchYear})
-                                  </span>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <span className="text-[11px] font-bold bg-white text-emerald-800 border border-emerald-300 px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
-                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                    Detail Produk Terinput
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => setPutawayStep(1)}
-                                    className="text-[11px] text-slate-500 hover:text-emerald-700 underline font-semibold cursor-pointer"
-                                  >
-                                    Ubah / Scan Ulang
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex items-start justify-between gap-3">
-                                <div>
-                                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                                    Nama Produk Terinput:
-                                  </span>
-                                  <h4 className="font-black text-slate-900 text-base sm:text-lg leading-tight">
-                                    {parsedFgQr.productName}
-                                  </h4>
-                                </div>
-                                <span className="text-xs font-mono font-bold text-cyan-800 bg-white px-2.5 py-1 rounded-lg border border-cyan-200 shrink-0">
-                                  PIN #{parsedFgQr.productPin}
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs pt-1">
-                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Karton Terbaca Awal</span>
-                                  <span className="font-mono font-black text-emerald-900 text-sm">{parsedFgQr.cartonNumberFormatted}</span>
-                                </div>
-                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Waktu Produksi</span>
-                                  <span className="font-bold text-slate-800">{parsedFgQr.productionTimeFormatted}</span>
-                                </div>
-                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Tgl Produksi</span>
-                                  <span className="font-bold text-slate-800">{parsedFgQr.productionDateFormatted}</span>
-                                </div>
-                                <div className="bg-white/80 p-2 rounded-xl border border-emerald-100">
-                                  <span className="text-slate-400 block text-[10px] uppercase font-bold">Best Before</span>
-                                  <span className="font-bold text-slate-800">{parsedFgQr.bestBeforeFormatted}</span>
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Range Inputs */}
-                          <div className="p-4 sm:p-5 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
-                            <div className="flex items-center justify-between flex-wrap gap-2">
-                              <span className="text-xs font-black uppercase tracking-wider text-slate-800">
-                                Rentang Nomor Karton Box:
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const endVal = parsedFgQr?.cartonNumber || cartonEnd || 86;
-                                  setCartonEnd(endVal);
-                                  setCartonStart(Math.max(1, endVal - 14));
-                                }}
-                                className="text-[11px] font-bold text-cyan-700 hover:text-cyan-800 bg-cyan-50 hover:bg-cyan-100 px-2.5 py-1 rounded-lg border border-cyan-200 transition cursor-pointer"
-                              >
-                                Set 15 Box Maksimal (Penuh)
-                              </button>
-                            </div>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div>
-                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                  Nomor Karton Awal
-                                </label>
-                                <div className="flex items-center gap-2">
-                                  <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
-                                    D
-                                  </span>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={cartonStart}
-                                    onChange={(e) => setCartonStart(parseInt(e.target.value, 10) || 1)}
-                                    className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
-                                  />
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setCartonStart(prev => Math.max(1, prev - 1))}
-                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
-                                      title="Kurangi 1"
-                                    >
-                                      -1
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setCartonStart(prev => prev + 1)}
-                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
-                                      title="Tambah 1"
-                                    >
-                                      +1
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div>
-                                <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                  Nomor Karton Akhir
-                                </label>
-                                <div className="flex items-center gap-2">
-                                  <span className="w-12 h-12 sm:h-13 flex items-center justify-center bg-slate-200/90 border-2 border-slate-300 rounded-xl text-lg font-mono font-black text-slate-700 shrink-0">
-                                    D
-                                  </span>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    value={cartonEnd}
-                                    onChange={(e) => setCartonEnd(parseInt(e.target.value, 10) || 1)}
-                                    className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono text-xl sm:text-2xl font-black text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100"
-                                  />
-                                  <div className="flex flex-col gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      onClick={() => setCartonEnd(prev => Math.max(1, prev - 1))}
-                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
-                                      title="Kurangi 1"
-                                    >
-                                      -1
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => setCartonEnd(prev => prev + 1)}
-                                      className="px-2.5 py-1 bg-white hover:bg-slate-100 border border-slate-300 rounded text-xs font-bold cursor-pointer"
-                                      title="Tambah 1"
-                                    >
-                                      +1
-                                    </button>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Live Calculation & Validation Badge */}
-                          <div className={`p-4 rounded-xl border text-xs ${
-                            isBoxCountValidOption1
-                              ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                              : 'bg-rose-50 border-rose-200 text-rose-900'
-                          }`}>
-                            <div className="flex items-center justify-between">
-                              <span className="font-bold">
-                                Total Muatan: <strong>{calculatedBoxCount} BOX</strong>
-                                <span className="text-slate-500 ml-1">
-                                  ({calculatedBoxCount * 30} Kg Netto &bull; {calculatedBoxCount * 32.05} Kg Gross)
-                                </span>
-                              </span>
-                              <span className={`px-2 py-0.5 rounded-full font-bold text-[10px] ${
-                                isBoxCountValidOption1 ? 'bg-emerald-200 text-emerald-900' : 'bg-rose-200 text-rose-900'
-                              }`}>
-                                {isBoxCountValidOption1 ? '✓ Valid (Maks 15 Box)' : '⚠ Tidak Valid'}
-                              </span>
-                            </div>
-
-                            {calculatedBoxCount > 15 && (
-                              <p className="text-xs font-bold text-rose-700 mt-1">
-                                Peringatan: 1 Pallet maksimal berisi 15 Box! Saat ini terhitung {calculatedBoxCount} Box. Harap sesuaikan range nomor karton.
-                              </p>
-                            )}
-                            {calculatedBoxCount <= 0 && (
-                              <p className="text-xs font-bold text-rose-700 mt-1">
-                                Nomor karton akhir harus lebih besar atau sama dengan nomor awal.
-                              </p>
-                            )}
-                            {isBoxCountValidOption1 && (
-                              <p className="text-xs font-semibold text-emerald-700 mt-1">
-                                Rentang valid: D{String(cartonStart).padStart(3, '0')} s/d D{String(cartonEnd).padStart(3, '0')} ({calculatedBoxCount} Box).
-                              </p>
-                            )}
-                          </div>
-
-                          {/* Pallet Number with Scanner & Camera Support (Format KP-001 s/d seterusnya) */}
-                          <div className="p-4 sm:p-5 bg-cyan-50/50 rounded-2xl border-2 border-cyan-200 space-y-3">
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 flex items-center gap-1.5">
-                                <Scan className="w-4 h-4 text-cyan-600" />
-                                Nomor Pallet (Scan QR Pallet - Format KP-001)
-                              </label>
-                              <span className="text-[11px] text-slate-500">
-                                Isian dikosongkan untuk di-scan langsung membaca barcode/QR pada pallet (tidak selalu harus urut).
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <div className="relative flex-1">
-                                <input
-                                  type="text"
-                                  value={palletNumber}
-                                  onChange={(e) => setPalletNumber(e.target.value.toUpperCase())}
-                                  onBlur={(e) => setPalletNumber(formatToKpPallet(e.target.value))}
-                                  placeholder="Scan QR code pada pallet (format KP-001)..."
-                                  className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-cyan-400 rounded-xl font-mono font-black text-lg sm:text-xl text-slate-900 focus:border-cyan-600 focus:ring-4 focus:ring-cyan-200 uppercase placeholder:font-normal placeholder:text-slate-400 shadow-2xs"
-                                />
-                                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-xs font-bold text-cyan-700 bg-cyan-100 px-2 py-1 rounded-md">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  <span>Format KP</span>
-                                </div>
-                              </div>
-                              {isCameraEnabled && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      stopCamera();
-                                    }
-                                  }}
-                                  className={`h-12 sm:h-13 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
-                                    cameraActive
-                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
-                                      : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-700'
-                                  }`}
-                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Pallet'}
-                                >
-                                  <Camera className="w-4 h-4" />
-                                  <span>{cameraActive ? 'Stop' : 'Scan QR Pallet'}</span>
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Scanner / Camera Hint Banner */}
-                            <div className="p-2.5 bg-white/90 rounded-xl border border-cyan-200 flex items-center justify-between text-xs text-cyan-950 flex-wrap gap-2">
-                              <div className="flex items-center gap-2">
-                                <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-                                <span className="font-semibold">
-                                  {isCameraEnabled 
-                                    ? 'Scanner Gun & Kamera Siap: Tembak barcode/QR pallet (format KP-001) untuk mengisi otomatis.'
-                                    : 'Scanner Gun Siap: Tembak barcode/QR pallet (format KP-001) menggunakan Scanner Gun.'}
-                                </span>
-                              </div>
-                              {isCameraEnabled && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                                    }
-                                  }}
-                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[11px] rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5"
-                                >
-                                  <Camera className="w-3.5 h-3.5" />
-                                  <span>{cameraActive ? 'Kamera Aktif' : 'Aktifkan Kamera'}</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Operator Note Input */}
-                          <div>
-                            <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                              Catatan / Note Operator (Pemeriksaan Range & Kondisi)
-                            </label>
-                            <input
-                              type="text"
-                              value={operatorNote}
-                              onChange={(e) => setOperatorNote(e.target.value)}
-                              placeholder="Contoh: Range fisik verified D072-D086, kondisi karton baik"
-                              className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl text-sm sm:text-base font-semibold text-slate-900 focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100 placeholder:text-slate-400"
-                            />
-                          </div>
-
-                          {/* Pilihan Status IC (OK, HOLD, BO) - Default: OK */}
-                          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="block text-xs font-black uppercase tracking-wider text-slate-800">
-                                Status IC Pallet (Inspection & Control):
-                              </label>
-                              <span className="text-[10px] text-slate-500 font-medium">
-                                Default: <strong className="text-emerald-700">OK</strong>
-                              </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-3 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('OK')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'OK'
-                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>OK (Normal)</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('HOLD')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'HOLD'
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <AlertCircle className="w-4 h-4" />
-                                <span>HOLD (QC)</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('BO')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'BO'
-                                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <AlertTriangle className="w-4 h-4" />
-                                <span>BO (Rework)</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              disabled={!isBoxCountValidOption1}
-                              onClick={() => setPutawayStep(3)}
-                              className={`w-full py-2.5 font-bold text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center justify-center gap-2 ${
-                                isBoxCountValidOption1
-                                  ? 'bg-cyan-600 hover:bg-cyan-700 text-white'
-                                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                              }`}
-                            >
-                              <span>Lanjut: Scan QR Code Rak Tujuan (Langkah 3)</span>
-                              <ArrowRight className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* STEP 3: SCAN RACK QR & CONFIRM STORAGE */}
-                      {putawayStep === 3 && (
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <Tag className="w-4 h-4 text-cyan-600" />
-                                Langkah 3: Scan QR Code Rak yang Dituju untuk Penyimpanan
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Arahkan scanner ke sticker QR fisik pada tiang rak (Contoh: RAK-A-P1 s/d RAK-A-P4).
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setPutawayStep(2)}
-                              className="text-xs font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
-                            >
-                              <ArrowLeft className="w-3.5 h-3.5" />
-                              <span>Kembali</span>
-                            </button>
-                          </div>
-
-                          {/* Target Slot Input / Selector */}
-                          <div className="space-y-2">
-                            <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800">
-                              Kode Slot Rak Terpilih:
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={targetSlot}
-                                onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
-                                onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
-                                placeholder="Contoh: A1a, F2b, A3m"
-                                className={`flex-1 h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
-                                  isTargetSlotBlocked 
-                                    ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
-                                    : 'border-slate-300 text-cyan-950 focus:border-cyan-500 focus:ring-cyan-100'
-                                }`}
-                              />
-                              {isCameraEnabled && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      stopCamera();
-                                    }
-                                  }}
-                                  className={`h-13 sm:h-14 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
-                                    cameraActive
-                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
-                                      : 'bg-cyan-600 border-cyan-600 text-white hover:bg-cyan-700'
-                                  }`}
-                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Slot Rak'}
-                                >
-                                  <Camera className="w-4 h-4" />
-                                  <span>{cameraActive ? 'Stop' : 'Scan QR Rak'}</span>
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Alert jika slot yang dipilih terkendala di lapangan */}
-                            {isTargetSlotBlocked && (
-                              <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs text-rose-900 flex items-start gap-2 animate-in fade-in">
-                                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                                <div>
-                                  <span className="font-black uppercase block">SLOT TERKENDALA DI LAPANGAN (DIBLOKIR):</span>
-                                  <span className="font-semibold">
-                                    Slot {targetSlot} mengalami kendala fisik: <em>"{targetSlotBlockedReason}"</em>. Sistem memblokir pengisian pallet IC ke slot ini. Harap pilih slot kosong lainnya.
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Scanner / Camera Hint & Activation for Rack QR */}
-                            {isCameraEnabled ? (
-                              <div className="p-3 bg-cyan-50/70 border border-cyan-200 rounded-xl flex items-center justify-between text-xs text-cyan-950 flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-2.5 h-2.5 rounded-full ${cameraActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'} shrink-0`} />
-                                  <span className="font-semibold">
-                                    {cameraActive
-                                      ? 'Kamera Aktif: Arahkan ke sticker QR Code Slot Rak (misal A1a, B2b)'
-                                      : 'Akses Kamera Siap: Scan sticker QR Slot Rak menggunakan Kamera HP / Scanner Gun:'}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      stopCamera();
-                                    }
-                                  }}
-                                  className={`px-3 py-1.5 font-bold text-xs rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5 ${
-                                    cameraActive
-                                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                                      : 'bg-cyan-700 hover:bg-cyan-800 text-white'
-                                  }`}
-                                >
-                                  <Camera className="w-3.5 h-3.5" />
-                                  <span>{cameraActive ? 'Matikan Kamera' : 'Nyalakan Kamera untuk Scan QR Rak'}</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-700">
-                                <Scan className="w-4 h-4 text-slate-500 shrink-0" />
-                                <span>Tembak Scanner Gun ke sticker barcode/QR Slot Rak pada tiang rak fisik (Contoh: A1a, B2b).</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Storage Recap Card */}
-                          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
-                            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                              Ringkasan Penyimpanan Pallet - Opsi 1 (scan-range)
-                            </span>
-                            <div className="grid grid-cols-2 gap-2 text-slate-800">
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">NOMOR PALLET</span>
-                                <span className="font-mono font-bold text-slate-900">{palletNumber}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">PRODUK</span>
-                                <span className="font-bold">{parsedFgQr?.productName}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">LINE & BATCH</span>
-                                <span className="font-bold">{parsedFgQr?.packingLineName} &bull; Batch {parsedFgQr?.batchNo}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">RENTANG KARTON</span>
-                                <span className="font-bold">D{String(cartonStart).padStart(3, '0')} s/d D{String(cartonEnd).padStart(3, '0')} ({calculatedBoxCount} Box)</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">TANGGAL PRODUKSI</span>
-                                <span className="font-bold font-mono text-slate-900">
-                                  {parsedFgQr?.productionDateFormatted || '-'}
-                                  {parsedFgQr?.productionTimeFormatted ? ` • ${parsedFgQr.productionTimeFormatted}` : ''}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">BEST BEFORE / EXP</span>
-                                <span className="font-bold font-mono text-emerald-800">
-                                  {parsedFgQr?.bestBeforeFormatted || '-'}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">LOKASI TUJUAN</span>
-                                <span className="font-mono font-black text-cyan-800">{targetSlot}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">STATUS IC</span>
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black ${
-                                  icStatus === 'BO'
-                                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                                    : icStatus === 'HOLD'
-                                    ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                }`}>
-                                  {icStatus === 'BO' && <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span>}
-                                  {icStatus === 'HOLD' && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>}
-                                  {icStatus} {icStatus === 'BO' ? '(Rework)' : icStatus === 'HOLD' ? '(Hold QC)' : '(Normal)'}
-                                </span>
-                              </div>
-                              <div className="col-span-2">
-                                <span className="text-slate-400 block text-[10px]">NOTE OPERATOR</span>
-                                <span className="italic text-slate-700">{operatorNote || 'Tidak ada catatan'}</span>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              onClick={handleFinalPutawaySubmit}
-                              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-sm rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-2"
-                            >
-                              <Check className="w-5 h-5 stroke-[2.5]" />
-                              Konfirmasi Simpan ke Rak {targetSlot} (Submit 1 Pallet)
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-
-                  {/* ============================================================== */}
-                  {/* OPSI 2: SCAN SEMUA QR PRODUK (MIN 2, MAKS 15) + NO PALLET + SCAN RAK */}
-                  {/* ============================================================== */}
-                  {putawayOption === 'OPTION_2_SCAN_ALL' && (
-                    <>
-                      {/* Step Progress Header Opsi 2 */}
-                      <div className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-xs">
-                        <div className="flex items-center justify-between text-xs font-bold">
-                          <div className="flex items-center gap-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                              putawayStep === 1 ? 'bg-emerald-600 text-white' : 'bg-emerald-100 text-emerald-800'
-                            }`}>
-                              1
-                            </span>
-                            <span className={putawayStep === 1 ? 'text-emerald-900 font-extrabold' : 'text-slate-500'}>
-                              Scan Semua QR Karton ({scannedCartons.length}/15) & No. Pallet
-                            </span>
-                          </div>
-                          <ArrowRight className="w-4 h-4 text-slate-300" />
-                          <div className="flex items-center gap-2">
-                            <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-black ${
-                              putawayStep === 2 ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-500'
-                            }`}>
-                              2
-                            </span>
-                            <span className={putawayStep === 2 ? 'text-emerald-900 font-extrabold' : 'text-slate-500'}>
-                              Scan QR Rak & Simpan
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* STEP 1: SCAN ALL CARTONS */}
-                      {putawayStep === 1 && (
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <Layers className="w-4 h-4 text-emerald-600" />
-                                Langkah 1: Scan Semua QR Code Produk dalam 1 Pallet
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Operator memindai satu demi satu barcode produk. Batasan: <strong>Minimal 2 Carton & Maksimal 15 Carton</strong>.
-                              </p>
-                            </div>
-                            <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${
-                              scannedCartons.length >= 2 && scannedCartons.length <= 15
-                                ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
-                                : 'bg-amber-50 text-amber-800 border-amber-300'
-                            }`}>
-                              {scannedCartons.length} / 15 Box Ter-scan
-                            </span>
-                          </div>
-
-                          {/* Quick Simulate Button for Testing/Demo without physical scanner */}
-                          <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-100 flex flex-wrap items-center justify-between gap-2">
-                            <div className="text-xs text-emerald-950 flex items-center gap-2">
-                              <Scan className="w-4 h-4 text-emerald-700 shrink-0" />
-                              <span>Tembakkan scanner gun fisik (atau kamera) ke QR karton — data otomatis terinput di kolom atas.</span>
-                            </div>
-                            <button
-                              type="button"
-                              disabled={scannedCartons.length >= 15}
-                              onClick={() => {
-                                const nextNum = scannedCartons.length > 0 
-                                  ? Math.max(...scannedCartons.map(c => c.cartonNumber)) + 1 
-                                  : 72;
-                                const simQr = `PA274/26/FG-COF-122/${String(nextNum).padStart(3, '0')}/2026-06-30/14:35`;
-                                handleBarcodeDetected(simQr);
-                              }}
-                              className={`px-3 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer shrink-0 shadow-xs ${
-                                scannedCartons.length >= 15
-                                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                                  : 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                              }`}
-                            >
-                              + Tes Simulasi Scan (D{String((scannedCartons.length > 0 ? Math.max(...scannedCartons.map(c => c.cartonNumber)) : 71) + 1).padStart(3, '0')})
-                            </button>
-                          </div>
-
-                          {option2Notice && (
-                            <div className="p-2.5 bg-cyan-50 text-cyan-800 border border-cyan-200 rounded-xl text-xs flex items-center justify-between">
-                              <span>{option2Notice}</span>
-                              <button
-                                type="button"
-                                onClick={() => setOption2Notice(null)}
-                                className="text-cyan-600 hover:text-cyan-900 cursor-pointer font-bold"
-                              >
-                                &times;
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Scanned Cartons Table */}
-                          <div className="border border-slate-200 rounded-xl overflow-hidden">
-                            <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-700">
-                              <span>Daftar Karton Ter-scan ({scannedCartons.length} Box)</span>
-                              {scannedCartons.length > 0 && (
-                                <button
-                                  type="button"
-                                  onClick={() => setScannedCartons([])}
-                                  className="text-rose-600 hover:text-rose-800 text-[11px] font-bold cursor-pointer"
-                                >
-                                  Hapus Semua
-                                </button>
-                              )}
-                            </div>
-
-                            {scannedCartons.length === 0 ? (
-                              <div className="p-6 text-center text-slate-400 text-xs">
-                                Belum ada karton yang di-scan. Scan barcode QR produk di pallet untuk memulai (minimal 2 karton).
-                              </div>
-                            ) : (
-                              <div className="max-h-48 overflow-y-auto divide-y divide-slate-100">
-                                {scannedCartons.map((item, idx) => (
-                                  <div key={item.cartonNumber} className="px-3 py-2 flex items-center justify-between text-xs hover:bg-slate-50">
-                                    <div className="flex items-center gap-3">
-                                      <span className="w-5 h-5 rounded-full bg-slate-200 text-slate-700 flex items-center justify-center text-[10px] font-bold">
-                                        {idx + 1}
-                                      </span>
-                                      <span className="font-mono font-black text-slate-900 px-2 py-0.5 bg-amber-50 border border-amber-200 rounded">
-                                        {item.cartonFormatted}
-                                      </span>
-                                      <span className="text-slate-600 text-[11px] truncate max-w-xs">
-                                        {item.productName}
-                                      </span>
-                                    </div>
-                                    <div className="flex items-center gap-3">
-                                      <span className="text-[10px] text-slate-400 font-mono">{item.scannedAt}</span>
-                                      <button
-                                        type="button"
-                                        onClick={() => setScannedCartons(prev => prev.filter(c => c.cartonNumber !== item.cartonNumber))}
-                                        className="text-rose-500 hover:text-rose-700 text-xs font-bold p-1 cursor-pointer"
-                                        title="Hapus karton ini"
-                                      >
-                                        &times;
-                                      </button>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Validation Alert */}
-                          {scannedCartons.length < 2 && (
-                            <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 rounded-xl text-xs flex items-center gap-2">
-                              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                              <span>Syarat Opsi 2: Minimal 2 karton harus di-scan sebelum dapat melanjutkan ke pemilihan rak (Saat ini: {scannedCartons.length} Box).</span>
-                            </div>
-                          )}
-
-                          {/* Pallet Number & Operator Note Input */}
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Nomor Pallet (ID Pallet)
-                              </label>
-                              <input
-                                type="text"
-                                value={palletNumber}
-                                onChange={(e) => setPalletNumber(e.target.value.toUpperCase())}
-                                placeholder="Contoh: PLT-A-02"
-                                className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl font-mono font-black text-base sm:text-lg text-slate-900 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 uppercase placeholder:font-normal placeholder:text-slate-400"
-                              />
-                            </div>
-
-                            <div>
-                              <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800 mb-1.5">
-                                Catatan Operator (Opsional)
-                              </label>
-                              <input
-                                type="text"
-                                value={operatorNote}
-                                onChange={(e) => setOperatorNote(e.target.value)}
-                                placeholder="Contoh: Pallet utuh 15 carton, kondisi kemasan baik"
-                                className="w-full h-12 sm:h-13 px-4 bg-white border-2 border-slate-300 rounded-xl text-sm sm:text-base font-semibold text-slate-900 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 placeholder:text-slate-400"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Pilihan Status IC (OK, HOLD, BO) - Default: OK */}
-                          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                            <div className="flex items-center justify-between">
-                              <label className="block text-xs font-black uppercase tracking-wider text-slate-800">
-                                Status IC Pallet (Inspection & Control):
-                              </label>
-                              <span className="text-[10px] text-slate-500 font-medium">
-                                Default: <strong className="text-emerald-700">OK</strong>
-                              </span>
-                            </div>
-                            
-                            <div className="grid grid-cols-3 gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('OK')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'OK'
-                                    ? 'bg-emerald-600 text-white border-emerald-600 shadow-xs ring-2 ring-emerald-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>OK (Normal)</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('HOLD')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'HOLD'
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-xs ring-2 ring-blue-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <AlertCircle className="w-4 h-4" />
-                                <span>HOLD (QC)</span>
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => setIcStatus('BO')}
-                                className={`py-2 px-3 rounded-xl border-2 font-black text-xs sm:text-sm transition cursor-pointer flex items-center justify-center gap-1.5 ${
-                                  icStatus === 'BO'
-                                    ? 'bg-rose-600 text-white border-rose-600 shadow-xs ring-2 ring-rose-500/20'
-                                    : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-100'
-                                }`}
-                              >
-                                <AlertTriangle className="w-4 h-4" />
-                                <span>BO (Rework)</span>
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              disabled={!isBoxCountValidOption2}
-                              onClick={() => setPutawayStep(2)}
-                              className={`w-full py-3 sm:py-3.5 font-black text-sm rounded-xl shadow-xs transition cursor-pointer flex items-center justify-center gap-2 ${
-                                isBoxCountValidOption2
-                                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm'
-                                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                              }`}
-                            >
-                              <span>Lanjut: Scan QR Code Rak Tujuan (Langkah 2)</span>
-                              <ArrowRight className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* STEP 2: SCAN RACK QR & CONFIRM STORAGE */}
-                      {putawayStep === 2 && (
-                        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                          <div className="flex items-center justify-between">
-                            <div>
-                              <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                                <Tag className="w-4 h-4 text-emerald-600" />
-                                Langkah 2: Scan QR Code Rak yang Dituju untuk Penyimpanan
-                              </h4>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Arahkan scanner ke sticker QR fisik pada tiang rak (Contoh: RAK-A-P1 s/d RAK-A-P4).
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => setPutawayStep(1)}
-                              className="text-xs font-bold text-slate-500 hover:text-slate-700 flex items-center gap-1 cursor-pointer"
-                            >
-                              <ArrowLeft className="w-3.5 h-3.5" />
-                              <span>Kembali</span>
-                            </button>
-                          </div>
-
-                          {/* Target Slot Input / Selector */}
-                          <div className="space-y-2">
-                            <label className="block text-xs sm:text-sm font-black uppercase tracking-wider text-slate-800">
-                              Kode Slot Rak Terpilih:
-                            </label>
-                            <div className="flex items-center gap-2">
-                              <input
-                                type="text"
-                                value={targetSlot}
-                                onChange={(e) => setTargetSlot(formatSlotInput(e.target.value))}
-                                onBlur={(e) => setTargetSlot(formatSlotCodeProper(e.target.value))}
-                                placeholder="Contoh: A1a, F2b, A3m"
-                                className={`flex-1 h-13 sm:h-14 px-4 bg-white border-2 rounded-xl font-mono text-xl sm:text-2xl font-black tracking-wide placeholder:font-normal placeholder:text-slate-400 ${
-                                  isTargetSlotBlocked 
-                                    ? 'border-rose-500 text-rose-900 bg-rose-50/50 focus:border-rose-600 focus:ring-rose-200' 
-                                    : 'border-slate-300 text-emerald-950 focus:border-emerald-500 focus:ring-emerald-100'
-                                }`}
-                              />
-                              {isCameraEnabled && (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      stopCamera();
-                                    }
-                                  }}
-                                  className={`h-13 sm:h-14 px-3.5 sm:px-4 rounded-xl border-2 font-bold text-xs sm:text-sm flex items-center gap-1.5 shrink-0 transition cursor-pointer shadow-xs ${
-                                    cameraActive
-                                      ? 'bg-rose-600 border-rose-600 text-white hover:bg-rose-700'
-                                      : 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
-                                  }`}
-                                  title={cameraActive ? 'Matikan Kamera' : 'Buka Kamera untuk Scan QR Slot Rak'}
-                                >
-                                  <Camera className="w-4 h-4" />
-                                  <span>{cameraActive ? 'Stop' : 'Scan QR Rak'}</span>
-                                </button>
-                              )}
-                            </div>
-
-                            {/* Alert jika slot yang dipilih terkendala di lapangan */}
-                            {isTargetSlotBlocked && (
-                              <div className="p-3 bg-rose-50 border-2 border-rose-300 rounded-xl text-xs text-rose-900 flex items-start gap-2 animate-in fade-in">
-                                <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                                <div>
-                                  <span className="font-black uppercase block">SLOT TERKENDALA DI LAPANGAN (DIBLOKIR):</span>
-                                  <span className="font-semibold">
-                                    Slot {targetSlot} mengalami kendala fisik: <em>"{targetSlotBlockedReason}"</em>. Sistem memblokir pengisian pallet IC ke slot ini. Harap pilih slot kosong lainnya.
-                                  </span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Scanner / Camera Hint & Activation for Rack QR (Option 2) */}
-                            {isCameraEnabled ? (
-                              <div className="p-3 bg-emerald-50/70 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-950 flex-wrap gap-2">
-                                <div className="flex items-center gap-2">
-                                  <div className={`w-2.5 h-2.5 rounded-full ${cameraActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'} shrink-0`} />
-                                  <span className="font-semibold">
-                                    {cameraActive
-                                      ? 'Kamera Aktif: Arahkan ke sticker QR Code Slot Rak (misal A1a, B2b)'
-                                      : 'Akses Kamera Siap: Scan sticker QR Slot Rak menggunakan Kamera HP / Scanner Gun:'}
-                                  </span>
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    if (!cameraActive) {
-                                      startCamera();
-                                    } else {
-                                      stopCamera();
-                                    }
-                                  }}
-                                  className={`px-3 py-1.5 font-bold text-xs rounded-lg shadow-2xs transition cursor-pointer flex items-center gap-1.5 ${
-                                    cameraActive
-                                      ? 'bg-rose-600 hover:bg-rose-700 text-white'
-                                      : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                                  }`}
-                                >
-                                  <Camera className="w-3.5 h-3.5" />
-                                  <span>{cameraActive ? 'Matikan Kamera' : 'Nyalakan Kamera untuk Scan QR Rak'}</span>
-                                </button>
-                              </div>
-                            ) : (
-                              <div className="p-2.5 bg-slate-100 border border-slate-200 rounded-xl flex items-center gap-2 text-xs text-slate-700">
-                                <Scan className="w-4 h-4 text-slate-500 shrink-0" />
-                                <span>Tembak Scanner Gun ke sticker barcode/QR Slot Rak pada tiang rak fisik (Contoh: A1a, B2b).</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Storage Recap Card */}
-                          <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-xl space-y-2 text-xs">
-                            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 block">
-                              Ringkasan Penyimpanan Pallet - Opsi 2 (scan allbox)
-                            </span>
-                            <div className="grid grid-cols-2 gap-2 text-slate-800">
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">NOMOR PALLET</span>
-                                <span className="font-mono font-bold text-slate-900">{palletNumber}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">PRODUK</span>
-                                <span className="font-bold">{parsedFgQr?.productName}</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">TOTAL KARTON</span>
-                                <span className="font-bold">{scannedCartons.length} Box (Min 2, Maks 15)</span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">TANGGAL PRODUKSI</span>
-                                <span className="font-bold font-mono text-slate-900">
-                                  {parsedFgQr?.productionDateFormatted || '-'}
-                                  {parsedFgQr?.productionTimeFormatted ? ` • ${parsedFgQr.productionTimeFormatted}` : ''}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">BEST BEFORE / EXP</span>
-                                <span className="font-bold font-mono text-emerald-800">
-                                  {parsedFgQr?.bestBeforeFormatted || '-'}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-slate-400 block text-[10px]">LOKASI TUJUAN</span>
-                                <span className="font-mono font-black text-emerald-800">{targetSlot}</span>
-                              </div>
-                              <div className="col-span-2">
-                                <span className="text-slate-400 block text-[10px]">STATUS IC</span>
-                                <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black ${
-                                  icStatus === 'BO'
-                                    ? 'bg-rose-100 text-rose-800 border border-rose-300'
-                                    : icStatus === 'HOLD'
-                                    ? 'bg-blue-100 text-blue-800 border border-blue-300'
-                                    : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                                }`}>
-                                  {icStatus === 'BO' && <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span>}
-                                  {icStatus === 'HOLD' && <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>}
-                                  {icStatus} {icStatus === 'BO' ? '(Rework)' : icStatus === 'HOLD' ? '(Hold QC)' : '(Normal)'}
-                                </span>
-                              </div>
-                              <div className="col-span-2">
-                                <span className="text-slate-400 block text-[10px]">DAFTAR NO KARTON</span>
-                                <span className="font-mono font-bold text-slate-700">
-                                  {scannedCartons.map(c => c.cartonFormatted).join(', ')}
-                                </span>
-                              </div>
-                              {operatorNote && (
-                                <div className="col-span-2">
-                                  <span className="text-slate-400 block text-[10px]">CATATAN OPERATOR</span>
-                                  <span className="italic text-slate-700">{operatorNote}</span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="pt-2">
-                            <button
-                              type="button"
-                              onClick={handleFinalPutawaySubmit}
-                              className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-extrabold text-sm rounded-xl shadow-md transition cursor-pointer flex items-center justify-center gap-2"
-                            >
-                              <Check className="w-5 h-5 stroke-[2.5]" />
-                              Konfirmasi Simpan ke Rak {targetSlot} (Submit 1 Pallet)
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
-                </>
               )}
+
+              <InboundSimplePutawayView
+                putawayOption={putawayOption}
+                onChangePutawayOption={setPutawayOption}
+                parsedFgQr={parsedFgQr}
+                palletNumber={palletNumber}
+                targetSlot={targetSlot}
+                operatorNote={operatorNote}
+                icStatus={icStatus}
+                effectiveBoxCount={effectiveBoxCount}
+                boxCapacityInfo={boxCapacityInfo}
+                cartonStart={cartonStart}
+                cartonEnd={cartonEnd}
+                scannedCartons={scannedCartons}
+                onRemoveScannedCarton={handleRemoveScannedCarton}
+                onClearScannedCartons={handleClearScannedCartons}
+                onSimulateScanNextBox={handleSimulateScanNextBox}
+                onSimulateFill15Boxes={handleSimulateFill15Boxes}
+                isCameraEnabled={isCameraEnabled}
+                cameraActive={cameraActive}
+                scanTargetField={scanTargetField}
+                isTargetSlotBlocked={isTargetSlotBlocked}
+                targetSlotBlockedReason={targetSlotBlockedReason}
+                onStartCameraForField={(field) => {
+                  setScanTargetField(field);
+                  startCamera();
+                }}
+                onStopCamera={() => {
+                  stopCamera();
+                  setScanTargetField(null);
+                }}
+                onChangePalletNumber={setPalletNumber}
+                onChangeTargetSlot={setTargetSlot}
+                onChangeOperatorNote={setOperatorNote}
+                onChangeIcStatus={setIcStatus}
+                onChangeBoxCount={(count) => {
+                  setBoxCount(count);
+                  if (parsedFgQr?.cartonNumber) {
+                    setCartonEnd(parsedFgQr.cartonNumber);
+                    setCartonStart(Math.max(1, parsedFgQr.cartonNumber - count + 1));
+                  }
+                }}
+                onSetCartonRange={(start, end) => {
+                  setCartonStart(start);
+                  setCartonEnd(end);
+                  setBoxCount(Math.max(1, end - start + 1));
+                }}
+                onUseSampleQr={() => handleBarcodeDetected(SAMPLE_FG_QR_CODE)}
+                onSubmit={handleFinalPutawaySubmit}
+              />
             </div>
           )}
 

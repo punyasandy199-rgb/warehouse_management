@@ -845,128 +845,138 @@ export const OutWarehouseView: React.FC<OutWarehouseViewProps> = ({
   const currentTotalKg = currentPlanItems.reduce((acc, item) => acc + item.totalKg, 0);
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-300">
-      {/* Top Banner: Outbound Module */}
-      <div className="bg-gradient-to-r from-rose-700 via-rose-600 to-red-700 rounded-3xl p-6 sm:p-7 text-white shadow-lg relative overflow-hidden border border-rose-500">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-rose-200 font-semibold tracking-wide uppercase">SOP Distribusi & Dispatch Gudang</span>
-            </div>
-            <h2 className="text-2xl sm:text-3xl font-black tracking-tight mt-1.5 flex items-center gap-2.5">
-              <ArrowUpFromLine className="w-7 h-7 stroke-[2.5]" />
-              <span>Proses Out: Pemilihan Fungsi Pengeluaran Produk</span>
-            </h2>
-            <p className="text-xs sm:text-sm text-rose-100 max-w-2xl mt-1 leading-relaxed">
-              Tentukan tujuan pengeluaran produk: Persiapan Plan Kirim Ekspedisi, Pemindahan Rak / Transit Antar Area, atau Pengembalian Produk BO ke Unit Packing.
-            </p>
+    <div className="space-y-4 animate-in fade-in duration-300">
+      {/* Top Banner: Outbound Module - Clean & Professional */}
+      <div className="bg-white rounded-xl p-4 sm:p-5 border border-slate-200/90 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-rose-600"></span>
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
+              Proses Out Warehouse · Distribusi & Dispatch Gudang
+            </span>
           </div>
+          <h2 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight mt-1 flex items-center gap-2">
+            <ArrowUpFromLine className="w-5 h-5 text-slate-700" />
+            <span>Proses Out: Pemilihan Fungsi Pengeluaran Produk</span>
+          </h2>
+          <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
+            Tentukan tujuan pengeluaran produk: Persiapan Plan Kirim Ekspedisi, Pemindahan Rak / Transit Antar Area, atau Pengembalian Produk BO ke Unit Packing.
+          </p>
+        </div>
 
-          <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
-            {onOpenSOP && (
-              <button
-                onClick={onOpenSOP}
-                className="px-3.5 py-2.5 bg-white/20 hover:bg-white/30 text-white font-extrabold text-xs sm:text-sm rounded-xl transition cursor-pointer flex items-center gap-2 border border-white/30 shadow-xs"
-                title="Buka SOP Outbound & Flowchart Alur Proses"
-              >
-                <BookOpen className="w-4 h-4 text-rose-200" />
-                <span>SOP & Alur Proses</span>
-              </button>
-            )}
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {onOpenSOP && (
             <button
-              onClick={() => onOpenScannerPicking()}
-              className="px-4 py-2.5 bg-white text-rose-900 hover:bg-rose-50 active:bg-rose-100 font-extrabold text-xs sm:text-sm rounded-xl shadow-md transition cursor-pointer flex items-center gap-2"
+              onClick={onOpenSOP}
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs sm:text-sm rounded-lg transition cursor-pointer flex items-center gap-1.5 border border-slate-200"
+              title="Buka SOP Outbound & Flowchart Alur Proses"
             >
-              <Scan className="w-4 h-4 text-rose-700" />
-              <span>Scanner Cepat Picking</span>
+              <BookOpen className="w-3.5 h-3.5 text-slate-500" />
+              <span>SOP & Alur</span>
             </button>
-          </div>
+          )}
+          <button
+            onClick={() => onOpenScannerPicking()}
+            className="px-3.5 py-2 bg-slate-900 hover:bg-black text-white font-bold text-xs sm:text-sm rounded-lg shadow-xs transition cursor-pointer flex items-center gap-2"
+          >
+            <Scan className="w-4 h-4 text-rose-400" />
+            <span>Scanner Cepat Picking</span>
+          </button>
         </div>
       </div>
 
-      {/* 3 PILIHAN FUNGSI PENGELUARAN PRODUK (DEVICE FRIENDLY) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+      {/* 3 PILIHAN FUNGSI PENGELUARAN PRODUK (CLEAN & SLEEK) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <button
           type="button"
           onClick={() => setActiveFunction('PREPARE_PLAN')}
-          className={`p-4 rounded-2xl border-2 text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
+          className={`p-4 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
             activeFunction === 'PREPARE_PLAN'
-              ? 'bg-rose-50 border-rose-600 ring-4 ring-rose-600/10'
-              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              ? 'bg-rose-50/70 border-rose-400 ring-1 ring-rose-400/20'
+              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${
-              activeFunction === 'PREPARE_PLAN' ? 'bg-rose-600 text-white' : 'bg-slate-100 text-slate-600'
+            <span className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold ${
+              activeFunction === 'PREPARE_PLAN' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
             }`}>
-              <Truck className="w-5 h-5" />
+              <Truck className="w-4 h-4" />
+            </span>
+            <span className="text-xs font-mono font-semibold text-rose-700">
+              {planKirimList.length} Plan Tersimpan
             </span>
           </div>
           <div>
-            <h3 className="font-black text-sm text-slate-900">PREPARE PLAN KIRIM</h3>
+            <h3 className="font-bold text-sm text-slate-900">PREPARE PLAN KIRIM</h3>
             <p className="text-xs text-slate-500 mt-1 leading-snug">
-              Input tanggal kirim, tujuan, centang staging/lorong, scan QR box pallet, rekap total box/kg, simpan draft & proses muat armada.
+              Input tanggal kirim, tujuan, centang staging/lorong, scan QR box pallet, rekap total box/kg, simpan draft & muat armada.
             </p>
           </div>
-          <div className="flex items-center justify-between text-[11px] font-bold text-rose-700 pt-1 border-t border-slate-100">
-            <span>{planKirimList.length} Plan Tersimpan</span>
-            <ChevronRight className="w-4 h-4" />
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 pt-1 border-t border-slate-100">
+            <span>Buka Plan Kirim</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveFunction('PEMINDAHAN_RAK')}
-          className={`p-4 rounded-2xl border-2 text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
+          className={`p-4 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
             activeFunction === 'PEMINDAHAN_RAK'
-              ? 'bg-amber-50 border-amber-600 ring-4 ring-amber-600/10'
-              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              ? 'bg-amber-50/70 border-amber-400 ring-1 ring-amber-400/20'
+              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${
-              activeFunction === 'PEMINDAHAN_RAK' ? 'bg-amber-600 text-white' : 'bg-slate-100 text-slate-600'
+            <span className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold ${
+              activeFunction === 'PEMINDAHAN_RAK' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
             }`}>
-              <ArrowRightLeft className="w-5 h-5" />
+              <ArrowRightLeft className="w-4 h-4" />
+            </span>
+            <span className="text-xs font-mono font-semibold text-amber-800">
+              {transitItems.length} di Transit
             </span>
           </div>
           <div>
-            <h3 className="font-black text-sm text-slate-900">PEMINDAHAN RAK</h3>
+            <h3 className="font-bold text-sm text-slate-900">PEMINDAHAN RAK</h3>
             <p className="text-xs text-slate-500 mt-1 leading-snug">
               Scan QR box produk, tampil mini dashboard 1 pallet, lalu scan rak tujuan baru ATAU centang area transit (Lorong/Loading).
             </p>
           </div>
-          <div className="flex items-center justify-between text-[11px] font-bold text-amber-800 pt-1 border-t border-slate-100">
-            <span>{transitItems.length} Pallet di Transit</span>
-            <ChevronRight className="w-4 h-4" />
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 pt-1 border-t border-slate-100">
+            <span>Buka Relokasi & Transit</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </div>
         </button>
 
         <button
           type="button"
           onClick={() => setActiveFunction('BO_PACKING')}
-          className={`p-4 rounded-2xl border-2 text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
+          className={`p-4 rounded-xl border text-left transition cursor-pointer flex flex-col justify-between gap-3 shadow-xs ${
             activeFunction === 'BO_PACKING'
-              ? 'bg-blue-50 border-blue-600 ring-4 ring-blue-600/10'
-              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+              ? 'bg-blue-50/70 border-blue-400 ring-1 ring-blue-400/20'
+              : 'bg-white border-slate-200 hover:border-slate-300 hover:bg-slate-50/80'
           }`}
         >
           <div className="flex items-center justify-between">
-            <span className={`w-10 h-10 rounded-xl flex items-center justify-center font-black ${
-              activeFunction === 'BO_PACKING' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'
+            <span className={`w-9 h-9 rounded-lg flex items-center justify-center font-bold ${
+              activeFunction === 'BO_PACKING' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
             }`}>
-              <Factory className="w-5 h-5" />
+              <Factory className="w-4 h-4" />
+            </span>
+            <span className="text-xs font-mono font-semibold text-blue-700">
+              {boRecords.length} Terkirim
             </span>
           </div>
           <div>
-            <h3 className="font-black text-sm text-slate-900">PENGIRIMAN BO KE PACKING</h3>
+            <h3 className="font-bold text-sm text-slate-900">PENGIRIMAN BO KE PACKING</h3>
             <p className="text-xs text-slate-500 mt-1 leading-snug">
-              Pilih Packing 1 atau Packing 2, scan QR produk BO, input catatan penempatan sementara, lalu keluarkan dari gudang.
+              Hanya untuk pallet berstatus BO (Back Order / Rework). Scan pallet, pilih unit packing (1 atau 2), stok rak otomatis terpotong.
             </p>
           </div>
-          <div className="flex items-center justify-between text-[11px] font-bold text-blue-800 pt-1 border-t border-slate-100">
-            <span>{boRecords.length} Riwayat BO</span>
-            <ChevronRight className="w-4 h-4" />
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-600 pt-1 border-t border-slate-100">
+            <span>Buka Pengiriman BO</span>
+            <ChevronRight className="w-3.5 h-3.5" />
           </div>
         </button>
       </div>

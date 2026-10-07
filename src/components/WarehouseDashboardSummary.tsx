@@ -14,7 +14,12 @@ import {
   BarChart3,
   LayoutGrid,
   Eye,
-  ArrowUpRight
+  ArrowUpRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  ClipboardCheck,
+  Database,
+  FileSpreadsheet
 } from 'lucide-react';
 import { RackData, RackSlot, UserRole } from '../types';
 import { RackVisualizer } from './RackVisualizer';
@@ -27,6 +32,8 @@ interface WarehouseDashboardSummaryProps {
   onSlotClick?: (slot: RackSlot) => void;
   onOpenScannerForSlot?: (slotCode: string) => void;
   onOpenPrintRackQr?: (rackId: string) => void;
+  onNavigateToModule?: (module: 'in-warehouse' | 'out-warehouse' | 'stock-opname' | 'data-master' | 'configuration-system' | 'sop-flowchart') => void;
+  onOpenSpreadsheet?: () => void;
   userRole?: UserRole;
   isAndroid?: boolean;
 }
@@ -38,6 +45,8 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
   onSlotClick,
   onOpenScannerForSlot,
   onOpenPrintRackQr,
+  onNavigateToModule,
+  onOpenSpreadsheet,
   userRole = 'operator',
   isAndroid = false
 }) => {
@@ -126,311 +135,255 @@ export const WarehouseDashboardSummary: React.FC<WarehouseDashboardSummaryProps>
         </p>
       </div>
 
-      {/* 2 KARTU UTAMA: TOTAL BOX (IN BOX & IN KG) + KETERSEDIAAN PALLET RAK GUDANG */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3.5">
+      {/* QUICK PROCESS LAUNCHER: ZOOM-SLIDE TRANSITION TO PROCESSES */}
+      {onNavigateToModule && (
+        <div className="bg-slate-900 text-white rounded-xl p-3 flex flex-col md:flex-row md:items-center justify-between gap-2.5 shadow-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+            <span className="text-xs font-bold text-slate-200">
+              Pintas Operasional (Transisi Zoom & Slide):
+            </span>
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-none">
+            <button
+              type="button"
+              onClick={() => onNavigateToModule('in-warehouse')}
+              className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+              title="Buka Proses Inbound dengan efek Zoom & Slide"
+            >
+              <ArrowDownToLine className="w-3.5 h-3.5" />
+              <span>Proses In (Inbound)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateToModule('out-warehouse')}
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+              title="Buka Proses Outbound dengan efek Zoom & Slide"
+            >
+              <ArrowUpFromLine className="w-3.5 h-3.5" />
+              <span>Proses Out (Outbound)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateToModule('stock-opname')}
+              className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+              title="Buka Stock Opname dengan efek Zoom & Slide"
+            >
+              <ClipboardCheck className="w-3.5 h-3.5" />
+              <span>Stock Opname</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onNavigateToModule('data-master')}
+              className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+              title="Buka Data Master dengan efek Zoom & Slide"
+            >
+              <Database className="w-3.5 h-3.5" />
+              <span>Data Master</span>
+            </button>
+            {onOpenSpreadsheet && (
+              <button
+                type="button"
+                onClick={onOpenSpreadsheet}
+                className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+                title="Buka Integrasi Google Spreadsheet & Segarkan Data"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Spreadsheet</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4 KARTU KPI ELEGAN & RINGKAS (CLEAN ENTERPRISE DESIGN, ZERO PILL OVERLOAD) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         
-        {/* Card 1: TOTAL BOX SEMUA BARANG JADI */}
-        <div className="bg-white rounded-2xl p-3 sm:p-3.5 border-2 border-blue-200 shadow-xs flex flex-col justify-between gap-2">
+        {/* Card 1: TOTAL BOX BARANG JADI */}
+        <div className="bg-white rounded-xl p-4 border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-blue-800 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-              Total Box Semua Barang Jadi
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Muatan Barang Jadi
             </span>
-            <span className="text-[10px] font-black text-blue-800 bg-blue-100 px-2 py-0.5 rounded-full font-mono">
-              {occupiedPallets} Pallet Terisi
+            <span className="text-xs font-mono font-semibold text-blue-600">
+              {occupiedPallets} Pallet
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl sm:text-3xl font-black text-slate-950 font-mono tracking-tight">
-                  {finalOccupiedBoxes.toLocaleString('id-ID')}
-                </span>
-                <span className="text-xs sm:text-sm font-black text-blue-700">BOX</span>
-              </div>
-              <div className="flex items-center gap-1.5 text-xs text-blue-950 mt-0.5">
-                <Scale className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                <span className="text-slate-500 text-[11px]">Total Kuantitas:</span>
-                <span className="font-mono font-black text-blue-900 text-xs sm:text-sm">
-                  {finalOccupiedKg.toLocaleString('id-ID')} Kg
-                </span>
-              </div>
-            </div>
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center font-bold shrink-0">
-              <Boxes className="w-5 h-5" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-blue-100 text-[11px]">
-            <div className="bg-blue-50/70 p-1.5 rounded-lg border border-blue-200/60">
-              <span className="block text-[10px] text-slate-500 font-semibold">Pallet Terisi:</span>
-              <span className="font-mono font-black text-blue-900 text-xs">
-                {occupiedPallets.toLocaleString('id-ID')} Pallet
+          <div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
+                {finalOccupiedBoxes.toLocaleString('id-ID')}
               </span>
+              <span className="text-xs sm:text-sm font-bold text-blue-600">BOX</span>
             </div>
-            <div className="bg-blue-50/70 p-1.5 rounded-lg border border-blue-200/60">
-              <span className="block text-[10px] text-slate-500 font-semibold">Utilisasi Rak:</span>
-              <span className="font-mono font-black text-blue-900 text-xs">
-                {occupancyPctText} Kapasitas
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1">
+              <span className="font-mono font-medium text-slate-700">
+                {finalOccupiedKg.toLocaleString('id-ID')} Kg
               </span>
+              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span className="font-medium text-blue-700">{occupancyPctText} Terisi</span>
             </div>
           </div>
         </div>
 
-        {/* Card 2: KETERSEDIAAN PALLET RAK GUDANG */}
-        <div className="bg-white rounded-2xl p-3 sm:p-3.5 border-2 border-emerald-300 shadow-xs flex flex-col justify-between gap-2">
+        {/* Card 2: KETERSEDIAAN PALLET RAK */}
+        <div className="bg-white rounded-xl p-4 border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
-              Ketersediaan Pallet Rak Gudang
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Ketersediaan Rak
             </span>
-            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full font-mono">
+            <span className="text-xs font-mono font-semibold text-emerald-600">
               {availablePctText} Kosong
             </span>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl sm:text-3xl font-black text-emerald-800 font-mono tracking-tight">
-                  {emptyPallets.toLocaleString('id-ID')}
-                </span>
-                <span className="text-xs sm:text-sm font-black text-emerald-700">Pallet Available</span>
-              </div>
-              <p className="text-[11px] text-slate-500 font-semibold">
-                Slot rak kosong siap ditempati barang jadi
-              </p>
+          <div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
+                {emptyPallets.toLocaleString('id-ID')}
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-emerald-600">PALLET</span>
             </div>
-            <div className="w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold shrink-0">
-              <PackageOpen className="w-5 h-5" />
-            </div>
-          </div>
-
-          {/* Konversi Sesuai Permintaan User: dikali 15 QTY Box & dikali 30 Kg per Box */}
-          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-emerald-100">
-            <div className="bg-emerald-50/80 p-1.5 rounded-lg border border-emerald-200/60">
-              <span className="block text-[10px] font-bold text-slate-500">Konversi QTY Box (x15):</span>
-              <span className="font-mono font-black text-emerald-900 text-xs sm:text-sm">
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1 truncate">
+              <span className="font-mono font-medium text-slate-700">
                 {emptyBoxConversion.toLocaleString('id-ID')} Box
               </span>
-            </div>
-            <div className="bg-emerald-50/80 p-1.5 rounded-lg border border-emerald-200/60">
-              <span className="block text-[10px] font-bold text-slate-500">Konversi in Kg (x30):</span>
-              <span className="font-mono font-black text-emerald-900 text-xs sm:text-sm">
-                {emptyKgConversion.toLocaleString('id-ID')} Kg
-              </span>
+              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span>{(emptyKgConversion / 1000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} Ton</span>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center justify-between text-[10px] text-slate-500 pt-0.5 flex-wrap gap-1">
-            <span>Kapasitas: <strong className="text-slate-800 font-mono">{totalPallets.toLocaleString('id-ID')} Pallet</strong> ({totalBoxCapacity.toLocaleString('id-ID')} Box / {totalKgCapacity.toLocaleString('id-ID')} Kg)</span>
-            <span>&bull;</span>
-            <span>Terisi: <strong className="text-blue-700 font-mono">{occupiedPallets} Pallet</strong> ({finalOccupiedBoxes} Box / {finalOccupiedKg.toLocaleString('id-ID')} Kg)</span>
+        {/* Card 3: TOTAL KAPASITAS GUDANG */}
+        <div className="bg-white rounded-xl p-4 border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Total Kapasitas Rak
+            </span>
+            <span className="text-xs font-mono font-semibold text-slate-500">
+              10 Rak (A - J)
+            </span>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
+                {totalPallets.toLocaleString('id-ID')}
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-slate-500">PALLET</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-1 truncate">
+              <span className="font-mono font-medium text-slate-700">
+                {totalBoxCapacity.toLocaleString('id-ID')} Box
+              </span>
+              <span aria-hidden="true" className="text-slate-300">·</span>
+              <span>{(totalKgCapacity / 1000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} Ton</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: KONDISI OPERASIONAL */}
+        <div className="bg-white rounded-xl p-4 border border-slate-200/90 shadow-xs flex flex-col justify-between gap-3 hover:border-slate-300 transition-colors">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500">
+              Kondisi Lapangan
+            </span>
+            <span className={`text-xs font-mono font-semibold ${
+              blockedPallets === 0 ? 'text-emerald-600' : 'text-amber-600'
+            }`}>
+              {blockedPallets === 0 ? '100% Siap' : `${blockedPallets} Terkendala`}
+            </span>
+          </div>
+
+          <div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 font-mono tracking-tight">
+                {blockedPallets === 0 ? 'Normal' : `${blockedPallets} Slot`}
+              </span>
+              <span className="text-xs sm:text-sm font-bold text-slate-500">
+                {blockedPallets === 0 ? '100%' : 'Diblokir'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-1 truncate">
+              {blockedPallets === 0 ? 'Semua tiang rak siap digunakan' : 'Ada tiang terhalang di lapangan'}
+            </p>
           </div>
         </div>
 
       </div>
 
       {/* ========================================================================= */}
-      {/* BAGIAN BAWAH: STATUS PER RAK FISIK (BISA DI-KLIK UNTUK DETAIL DENAH VISUAL) */}
+      {/* RACK SELECTOR STRIP: MINIMALIS, 1 BARIS, ERGONOMIS & ELEGAN */}
       {/* ========================================================================= */}
-      <div className="space-y-2 pt-1">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pb-1 border-b border-slate-200">
-          <div>
-            <h3 className="text-xs sm:text-sm font-black text-slate-900 flex items-center gap-1.5">
-              <LayoutGrid className="w-3.5 h-3.5 text-blue-600" />
-              <span>Status Kapasitas & Denah Visual Per Rak</span>
-            </h3>
-            <p className="text-[10px] text-slate-500">
-              Klik kartu rak untuk membuka denah visual 2D dan cek posisi pallet di bawah.
-            </p>
-          </div>
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 flex-wrap">
-            {/* Legend Penanda Status IC */}
-            <div className="flex items-center gap-1.5 text-[10px] bg-slate-50 border border-slate-200 px-2 py-0.5 rounded-md">
-              <span className="text-slate-400 font-bold">IC:</span>
-              <span className="inline-flex items-center gap-1 font-bold text-rose-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-600 animate-ping"></span>
-                <span>BO</span>
-              </span>
-              <span className="text-slate-300">&bull;</span>
-              <span className="inline-flex items-center gap-1 font-bold text-blue-700">
-                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
-                <span>HOLD</span>
-              </span>
-            </div>
-
-            <div className="flex items-center gap-1 text-[11px]">
-              <span>Aktif:</span>
-              <span className="font-mono font-black text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200">
-                Rak {activeRackId}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Grid Kartu Per Rak (Rak A, B, C, dll.) - 2 Kolom pada Android / Mobile agar Rapi dan Tidak Menumpuk */}
-        <div className={`grid gap-2 ${isAndroid ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 sm:gap-2.5'}`}>
+      <div className="bg-white p-2.5 sm:p-3 rounded-xl border border-slate-200/90 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+          <span className="text-xs font-bold uppercase text-slate-400 tracking-wider mr-1 shrink-0">
+            Pilih Rak:
+          </span>
           {Object.values(racks).map((rack: RackData) => {
             const isSelected = rack.id === activeRackId;
-            const palletsPerLoc = rack.palletsPerSlot || 4;
-            const locationCount = rack.slotsList?.length || Object.keys(rack.slots).length;
-            const rackPalletCapacity = rack.slotCount && rack.slotCount > locationCount 
-              ? rack.slotCount 
-              : locationCount * palletsPerLoc;
-
-            let rackOccupied = 0;
-            let rackBoxes = 0;
-            let rackBlockedLocations = 0;
-            let hasBo = false;
-            let hasHold = false;
-
-            Object.values(rack.slots).forEach((s: RackSlot) => {
-              if (s.isBlocked || s.status === 'maintenance') {
-                rackBlockedLocations++;
-              } else if (s.status === 'occupied' && s.pallet) {
-                rackOccupied++;
-                rackBoxes += s.pallet?.quantityBox || 15;
-                if (s.pallet.icStatus === 'BO') hasBo = true;
-                if (s.pallet.icStatus === 'HOLD') hasHold = true;
-              }
-            });
-
-            const rackBlockedPallets = rackBlockedLocations * palletsPerLoc;
-            const rackEmpty = Math.max(0, rackPalletCapacity - rackOccupied - rackBlockedPallets);
-            const rackPct = rackPalletCapacity > 0 ? (rackOccupied / rackPalletCapacity) * 100 : 0;
-            const rackPctText = formatPercentage(rackPct, true, rackOccupied);
+            const occ = Object.values(rack.slots).filter(s => s.status === 'occupied').length;
+            const hasBo = Object.values(rack.slots).some(s => s.status === 'occupied' && s.pallet?.icStatus === 'BO');
+            const hasHold = Object.values(rack.slots).some(s => s.status === 'occupied' && s.pallet?.icStatus === 'HOLD');
 
             return (
-              <div
+              <button
                 key={rack.id}
-                onClick={() => {
-                  onSelectRackId(rack.id);
-                  setDetailRack(rack);
-                }}
-                className={`p-2.5 sm:p-3 rounded-2xl border-2 transition-all cursor-pointer flex flex-col justify-between space-y-1.5 select-none ${
+                type="button"
+                onClick={() => onSelectRackId(rack.id)}
+                className={`px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 ${
                   isSelected
-                    ? 'bg-blue-50/90 border-blue-600 shadow-md ring-2 ring-blue-500/20'
-                    : 'bg-white border-slate-200 hover:border-blue-300 hover:bg-slate-50 shadow-2xs'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700'
                 }`}
               >
-                {/* Header Kartu: Label Rak & Status IC */}
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
-                    <span className={`w-6 h-6 rounded-lg font-black text-xs flex items-center justify-center font-mono ${
-                      isSelected ? 'bg-blue-600 text-white' : 'bg-slate-800 text-white'
-                    }`}>
-                      {rack.id}
-                    </span>
-                    <span className="font-black text-slate-900 text-xs sm:text-sm">
-                      Rak {rack.id}
-                    </span>
-                  </div>
-                  
-                  {/* Status IC Indicators */}
-                  <div className="flex items-center gap-1">
-                    {hasBo && (
-                      <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[9px] font-black animate-pulse">
-                        BO
-                      </span>
-                    )}
-                    {hasHold && (
-                      <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[9px] font-black">
-                        HOLD
-                      </span>
-                    )}
-                    {isSelected && !hasBo && !hasHold && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-ping"></span>
-                    )}
-                  </div>
-                </div>
+                <span>Rak {rack.id}</span>
+                <span className={`text-[11px] font-mono px-1 py-0.2 rounded ${
+                  isSelected ? 'bg-white/20 text-white' : 'text-slate-500'
+                }`}>
+                  {occ}
+                </span>
 
-                {/* Point Penting Sesuai Permintaan User: */}
-                <div className="bg-slate-50/90 p-2 rounded-xl border border-slate-100 space-y-1 text-xs">
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-600 font-semibold text-[11px]">Slot Terisi:</span>
-                    <span className="font-mono font-black text-blue-700 text-xs">
-                      {rackOccupied} Pallet
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-slate-600 font-semibold text-[11px]">Slot Available:</span>
-                    <span className="font-mono font-black text-emerald-700 text-xs">
-                      {rackEmpty} Pallet
-                    </span>
-                  </div>
-                  <div className="flex justify-between items-center pt-1 border-t border-slate-200/60 text-[10px] text-slate-500">
-                    <span>Kapasitas:</span>
-                    <span className="font-mono font-bold text-slate-700">
-                      {rackPalletCapacity} Pallet
-                    </span>
-                  </div>
-                </div>
-
-                {/* Progress bar % */}
-                <div className="space-y-1 pt-0.5">
-                  <div className="w-full bg-slate-200 h-1.5 rounded-full overflow-hidden">
-                    <div 
-                      className={`h-full rounded-full transition-all duration-300 ${rackPct > 80 ? 'bg-rose-500' : rackPct > 50 ? 'bg-amber-500' : 'bg-blue-600'}`}
-                      style={{ width: `${Math.max(rackOccupied > 0 ? 3 : 0, Math.min(100, rackPct))}%` }}
-                    ></div>
-                  </div>
-                  <div className="flex justify-between items-center text-[10px]">
-                    <span className="text-slate-500 font-bold">{rackPctText} Terisi</span>
-                    <span className={`font-bold flex items-center gap-0.5 ${isSelected ? 'text-blue-700 font-black' : 'text-slate-400'}`}>
-                      <span>{isSelected ? 'Terpilih' : 'Pilih'}</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </span>
-                  </div>
-                </div>
-              </div>
+                {/* IC status dots */}
+                {hasBo && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title="Ada produk BO" />
+                )}
+                {hasHold && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="Ada produk HOLD" />
+                )}
+              </button>
             );
           })}
         </div>
 
-        {/* DENAH VISUAL 2D DETAIL RAK TERPILIH LANGSUNG DI DASHBOARD */}
-        <div className="pt-4">
-          <div className="bg-slate-900 text-white px-5 py-3 rounded-t-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
-            <div className="flex items-center gap-3">
-              <span className="w-3 h-3 rounded-full bg-cyan-400"></span>
-              <h4 className="font-black text-sm sm:text-base tracking-wide">
-                Denah Visual 2D Slot Rak {activeRackId} ({currentRack?.primaryProduct || 'Barang Jadi'})
-              </h4>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setDetailRack(currentRack)}
-                className="px-3 py-1.5 rounded-xl bg-cyan-400 hover:bg-cyan-300 text-slate-950 font-black text-xs flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
-                title="Buka tabel lengkap seluruh slot dan pallet di rak ini"
-              >
-                <Eye className="w-3.5 h-3.5" />
-                <span>Buka Detail Lengkap Rak {activeRackId}</span>
-              </button>
-              <span className="text-xs font-mono text-cyan-300 hidden md:inline">
-                &bull; {Object.keys(currentRack?.slots || {}).length} Slot
-              </span>
-            </div>
-          </div>
+        <button
+          type="button"
+          onClick={() => setDetailRack(currentRack)}
+          className="px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 text-slate-700 font-semibold text-xs flex items-center gap-1.5 transition cursor-pointer shrink-0 self-end sm:self-center"
+        >
+          <Eye className="w-3.5 h-3.5 text-slate-500" />
+          <span>Tabel Rincian Rak {activeRackId}</span>
+        </button>
+      </div>
 
-          <div className="bg-white rounded-b-3xl border-x-2 border-b-2 border-slate-200 p-4 sm:p-6 shadow-sm">
-            <RackVisualizer
-              racks={racks}
-              activeRackId={activeRackId}
-              onSelectRackId={onSelectRackId}
-              onSlotClick={(slot) => {
-                if (onSlotClick) onSlotClick(slot);
-              }}
-              onOpenScannerForSlot={(slotCode) => {
-                if (onOpenScannerForSlot) onOpenScannerForSlot(slotCode);
-              }}
-              onOpenPrintRackQr={(rackId) => {
-                if (onOpenPrintRackQr) onOpenPrintRackQr(rackId);
-              }}
-              userRole={userRole}
-            />
-          </div>
-        </div>
-
+      {/* ELEVASI VISUAL RAK LANGSUNG (BERSIH & TERINTEGRASI) */}
+      <div className="pt-1">
+        <RackVisualizer
+          racks={racks}
+          activeRackId={activeRackId}
+          onSelectRackId={onSelectRackId}
+          onSlotClick={(slot) => {
+            if (onSlotClick) onSlotClick(slot);
+          }}
+          onOpenScannerForSlot={(slotCode) => {
+            if (onOpenScannerForSlot) onOpenScannerForSlot(slotCode);
+          }}
+          onOpenPrintRackQr={(rackId) => {
+            if (onOpenPrintRackQr) onOpenPrintRackQr(rackId);
+          }}
+          userRole={userRole}
+        />
       </div>
 
       {/* MODAL DETAIL ISI DALAM RAK (TABEL SLOT & ISI BARANG PALLET) */}

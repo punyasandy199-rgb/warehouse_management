@@ -39,7 +39,7 @@ interface BarcodeLabelModalProps {
   } | null;
 }
 
-type LabelSizePreset = '100x150' | '100x100' | '80x50' | 'a4';
+type LabelSizePreset = '100x150' | '100x100' | '80x50' | '50x30' | 'a4';
 
 export const BarcodeLabelModal: React.FC<BarcodeLabelModalProps> = ({
   isOpen,
@@ -72,6 +72,8 @@ export const BarcodeLabelModal: React.FC<BarcodeLabelModalProps> = ({
         return { widthMm: 100, heightMm: 100, title: '100 × 100 mm (Standar Pallet Box)' };
       case '80x50':
         return { widthMm: 80, heightMm: 50, title: '80 × 50 mm (Thermal Mini / Portable)' };
+      case '50x30':
+        return { widthMm: 50, heightMm: 30, title: '50 × 30 mm (Stiker Tiang Rak / Label Kecil)' };
       case 'a4':
         return { widthMm: 210, heightMm: 297, title: 'Kertas A4 Biasa' };
     }
@@ -79,7 +81,7 @@ export const BarcodeLabelModal: React.FC<BarcodeLabelModalProps> = ({
 
   const buildPrintHtml = () => {
     const dim = getLabelDimensions();
-    const qrSizePx = labelSize === '80x50' ? 120 : 160;
+    const qrSizePx = labelSize === '50x30' ? 80 : labelSize === '80x50' ? 120 : 160;
 
     return `
       <!DOCTYPE html>
@@ -399,6 +401,21 @@ export const BarcodeLabelModal: React.FC<BarcodeLabelModalProps> = ({
                 <div className="text-[11px]">80 × 50 mm</div>
                 <div className={`text-[9px] font-normal ${labelSize === '80x50' ? 'text-cyan-100' : 'text-slate-400'}`}>
                   Thermal Mini Portable
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setLabelSize('50x30')}
+                className={`px-2.5 py-1.5 rounded-xl text-left border text-xs font-bold transition cursor-pointer ${
+                  labelSize === '50x30'
+                    ? 'bg-cyan-600 text-white border-cyan-600 shadow-2xs'
+                    : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="text-[11px]">50 × 30 mm</div>
+                <div className={`text-[9px] font-normal ${labelSize === '50x30' ? 'text-cyan-100' : 'text-slate-400'}`}>
+                  Stiker Rak / Thermal
                 </div>
               </button>
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   RackData, 
   ProductItem, 
@@ -58,6 +58,7 @@ import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { ClearDataModal } from './components/ClearDataModal';
 import { InboundSummaryModal } from './components/InboundSummaryModal';
+import { SpreadsheetSyncModal } from './components/SpreadsheetSyncModal';
 import { SOPFlowchartView, SOPTab } from './components/SOPFlowchartView';
 import { parseSlotCode, findMatchingSlotKey } from './utils/barcode';
 import { soundManager } from './utils/audio';
@@ -107,28 +108,14 @@ export default function App() {
         const parsed = JSON.parse(saved);
         const first = Object.values(parsed)[0] as RackData | undefined;
         if (first && first.baysList && first.baysList.includes('a') && first.baysList.includes('m')) {
-          // Normalize loaded racks to 4-pallet slots per address and ensure empty rack slots (0 pallet)
+          // Normalize loaded racks to 4-pallet slots per address, keeping pallets and transactions 100% intact
           Object.values(parsed).forEach((r: any) => {
             const locCount = r.slotsList?.length || Object.keys(r.slots || {}).length;
             if (!r.palletsPerSlot || r.slotCount === locCount) {
               r.palletsPerSlot = 4;
               r.slotCount = locCount * 4;
             }
-            if (r.slots) {
-              Object.keys(r.slots).forEach((sKey) => {
-                if (r.slots[sKey].status === 'occupied' || r.slots[sKey].pallet || (r.slots[sKey].pallets && r.slots[sKey].pallets.length > 0)) {
-                  r.slots[sKey] = {
-                    ...r.slots[sKey],
-                    status: r.slots[sKey].status === 'maintenance' ? 'maintenance' : 'empty',
-                    pallet: undefined,
-                    pallets: [],
-                    palletSlots: undefined
-                  };
-                }
-              });
-            }
           });
-          localStorage.setItem(STORAGE_KEY_RACKS, JSON.stringify(parsed));
           return parsed;
         }
       }
@@ -146,9 +133,7 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const cleaned = parsed.map((p: any) => ({ ...p, currentStockBox: 0 }));
-          localStorage.setItem(STORAGE_KEY_PRODUCTS, JSON.stringify(cleaned));
-          return cleaned;
+          return parsed;
         }
       }
     } catch {}
@@ -246,15 +231,38 @@ export default function App() {
     saveSystemConfigToCloud({ stagingAreas: newAreas });
   };
 
-  // UI Navigation State: in-warehouse, out-warehouse, stock-opname, data-master, configuration-system, sop-flowchart
+  // UI Navigation State & Smooth Zoom-Slide Transition
   const [activeMainModule, setActiveMainModule] = useState<MainModule>('in-warehouse');
+  const prevMainModuleRef = useRef<MainModule>(activeMainModule);
+  const [transitionAnimationClass, setTransitionAnimationClass] = useState<string>('animate-view-zoom-in-process');
+
+  const handleSelectMainModule = (newModule: MainModule) => {
+    if (newModule === activeMainModule) return;
+    const prev = activeMainModule;
+    prevMainModuleRef.current = prev;
+
+    if (prev === 'dashboard' || prev === 'main-hub') {
+      // Dari Dashboard masuk ke Proses: Efek Zoom-In & Slide-Up
+      setTransitionAnimationClass('animate-view-zoom-in-process');
+    } else if (newModule === 'dashboard' || newModule === 'main-hub') {
+      // Dari Proses kembali ke Dashboard: Efek Zoom-Return & Slide-Down
+      setTransitionAnimationClass('animate-view-zoom-return-dashboard');
+    } else {
+      // Antar proses operasional: Efek Slide & Zoom
+      setTransitionAnimationClass('animate-view-slide-across');
+    }
+
+    setActiveMainModule(newModule);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const [activeTab, setActiveTab] = useState<string>('visual-rak');
   const [activeRackId, setActiveRackId] = useState<string>('A');
   const [sopInitialTab, setSopInitialTab] = useState<SOPTab>('flowchart');
 
   const handleOpenSOP = (tab: SOPTab = 'flowchart') => {
     setSopInitialTab(tab);
-    setActiveMainModule('sop-flowchart');
+    handleSelectMainModule('sop-flowchart');
   };
 
   // Modals State
@@ -272,6 +280,7 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState(false);
   const [isClearDataModalOpen, setIsClearDataModalOpen] = useState(false);
+  const [isSpreadsheetModalOpen, setIsSpreadsheetModalOpen] = useState(false);
   const [simulationResetCounter, setSimulationResetCounter] = useState(0);
 
   // Fitur Khusus Super Admin: ON / OFF Fitur Kamera Digunakan di Semua User
@@ -1556,7 +1565,7 @@ export default function App() {
         onOpenClearDataModal={() => setIsClearDataModalOpen(true)}
         onLogout={handleLogout}
         activeMainModule={activeMainModule}
-        onSelectMainModule={setActiveMainModule}
+        onSelectMainModule={handleSelectMainModule}
         activeTab={activeTab}
         onSelectTab={setActiveTab}
         deviceViewMode={deviceViewMode}
@@ -1570,10 +1579,12 @@ export default function App() {
         onMarkAllInboundAsRead={handleMarkAllInboundAsRead}
         isCameraScannerEnabled={isCameraGlobalEnabled}
         onToggleCameraScanner={handleToggleCameraScanner}
+        onOpenSpreadsheetModal={() => setIsSpreadsheetModalOpen(true)}
       />
 
-      {/* Main Container */}
+      {/* Main Container with Smooth Zooming & Sliding Transition */}
       <main className={`flex-1 w-full max-w-full mx-auto overflow-x-hidden ${isAndroid ? 'px-2 py-2.5' : 'max-w-7xl px-4 sm:px-6 lg:px-8 py-6'}`}>
+        <div key={activeMainModule} className={`w-full ${transitionAnimationClass}`}>
         {/* Modul: Dashboard Gudang (All-in-one: Ringkasan Total Box & Slot Kosong + Status Per Rak & Denah Visual Terintegrasi) */}
         {(activeMainModule === 'dashboard' || activeMainModule === 'main-hub') && (
           <WarehouseDashboardSummary
@@ -1591,6 +1602,8 @@ export default function App() {
               setPrintRackId(rId);
               setIsRackQrPrintOpen(true);
             }}
+            onNavigateToModule={handleSelectMainModule}
+            onOpenSpreadsheet={() => setIsSpreadsheetModalOpen(true)}
             userRole={currentUser.role}
             isAndroid={isAndroid}
           />
@@ -1618,7 +1631,7 @@ export default function App() {
               }
             }}
             onOpenMasterEmployee={() => {
-              setActiveMainModule('data-master');
+              handleSelectMainModule('data-master');
             }}
             onOpenScannerAudit={(slotCode) => {
               setScannerMode('AUDIT');
@@ -1644,7 +1657,7 @@ export default function App() {
             onDeleteRack={handleDeleteRack}
             onSelectRackForVisual={(rackId) => {
               setActiveRackId(rackId);
-              setActiveMainModule('in-warehouse');
+              handleSelectMainModule('in-warehouse');
             }}
             onPrintRackBarcodes={(rackId) => {
               setPrintRackId(rackId);
@@ -1705,6 +1718,7 @@ export default function App() {
             onForceSyncCloud={handleForceSyncToCloud}
             isCameraScannerEnabled={isCameraGlobalEnabled}
             onToggleCameraScanner={handleToggleCameraScanner}
+            onOpenSpreadsheetModal={() => setIsSpreadsheetModalOpen(true)}
           />
         )}
 
@@ -1712,7 +1726,7 @@ export default function App() {
         {activeMainModule === 'sop-flowchart' && (
           <SOPFlowchartView
             initialTab={sopInitialTab}
-            onNavigateToModule={(mod) => setActiveMainModule(mod)}
+            onNavigateToModule={(mod) => handleSelectMainModule(mod)}
             userRole={currentUser.role}
           />
         )}
@@ -1730,7 +1744,7 @@ export default function App() {
               if (opt) setScannerPutawayOption(opt);
               setIsScannerOpen(true);
             }}
-            onBackToMenuHub={() => setActiveMainModule('in-warehouse')}
+            onBackToMenuHub={() => handleSelectMainModule('dashboard')}
             onOpenSOP={() => handleOpenSOP('inbound')}
           />
         )}
@@ -1756,10 +1770,11 @@ export default function App() {
             onExecuteRelocateDirect={handleExecuteRelocate}
             onPlacePalletToSlot={handlePlacePalletToSlot}
             onAddLog={addLog}
-            onBackToMenuHub={() => setActiveMainModule('in-warehouse')}
+            onBackToMenuHub={() => handleSelectMainModule('dashboard')}
             onOpenSOP={() => handleOpenSOP('outbound')}
           />
         )}
+        </div>
       </main>
     </div>
   );
@@ -1925,6 +1940,18 @@ export default function App() {
         onClearForSimulation={handleClearForSimulation}
         onLoadDemoData={handleLoadDemoData}
         onFactoryReset={handleFactoryReset}
+      />
+
+      {/* Pusat Integrasi Database Google Spreadsheet Modal */}
+      <SpreadsheetSyncModal
+        isOpen={isSpreadsheetModalOpen}
+        onClose={() => setIsSpreadsheetModalOpen(false)}
+        racks={racks}
+        products={products}
+        employees={employees}
+        logs={logs}
+        stagingAreas={stagingAreas}
+        currentUserName={currentUser.name}
       />
 
       {/* Real-Time Inbound Notification Toast for Admin / SPV / Online Users */}

@@ -40,7 +40,8 @@ import {
   RefreshCw,
   Bell,
   Camera,
-  Scan
+  Scan,
+  FileSpreadsheet
 } from 'lucide-react';
 import { UserAccount, UserRole, InboundNotification } from '../types';
 import { CartoonWarehouseLogo } from './CartoonWarehouseLogo';
@@ -72,6 +73,7 @@ interface HeaderProps {
   onMarkAllInboundAsRead?: () => void;
   isCameraScannerEnabled?: boolean;
   onToggleCameraScanner?: (enabled: boolean) => void;
+  onOpenSpreadsheetModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -98,7 +100,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInboundSummary,
   onMarkAllInboundAsRead,
   isCameraScannerEnabled = true,
-  onToggleCameraScanner
+  onToggleCameraScanner,
+  onOpenSpreadsheetModal
 }) => {
   const [timeStr, setTimeStr] = useState('');
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
@@ -313,6 +316,19 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-slate-400 hidden sm:inline">&bull;</span>
               <span className="font-mono text-[11px] hidden sm:inline">{timeStr}</span>
             </button>
+
+            {/* Integrasi Google Spreadsheet & Tombol Segarkan */}
+            {onOpenSpreadsheetModal && (
+              <button
+                type="button"
+                onClick={onOpenSpreadsheetModal}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold transition cursor-pointer shadow-2xs"
+                title="Buka Pusat Integrasi & Segarkan Data ke Google Spreadsheet"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden sm:inline">Spreadsheet</span>
+              </button>
+            )}
 
             {/* Platform View Selector: Web Desktop vs Android Handheld - Logo Saja (Simple Icon Only) */}
             <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 shrink-0">
@@ -640,88 +656,102 @@ export const Header: React.FC<HeaderProps> = ({
             ? 'grid grid-cols-3 gap-1.5 w-full'
             : 'flex flex-wrap items-center justify-between gap-1.5 sm:gap-2'
         }`}>
-          <div className={`${deviceViewMode === 'android' ? 'contents' : 'flex flex-wrap items-center gap-1.5 sm:gap-2'}`}>
+          <div className={`${deviceViewMode === 'android' ? 'contents' : 'flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200/80'}`}>
+            {/* Pilihan 0: Dashboard */}
+            <button
+              onClick={() => onSelectMainModule('dashboard')}
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
+                activeMainModule === 'dashboard' || activeMainModule === 'main-hub'
+                  ? 'bg-blue-600 text-white shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+              title="Dashboard Monitoring Kapasitas & Status Rak"
+            >
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span className="truncate">Dashboard</span>
+            </button>
+
             {/* Pilihan 1: Proses In */}
             <button
               onClick={() => onSelectMainModule('in-warehouse')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'in-warehouse'
-                  ? 'bg-emerald-600 border-emerald-600 text-white shadow-xs ring-1 ring-emerald-500/20'
-                  : 'border-emerald-200 text-emerald-800 bg-emerald-50/80 hover:bg-emerald-100'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="Proses In (Inbound Putaway)"
             >
-              <ArrowDownToLine className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'in-warehouse' ? 'bg-emerald-600' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'Inbound' : 'Proses In'}</span>
             </button>
 
             {/* Pilihan 2: Proses Out */}
             <button
               onClick={() => onSelectMainModule('out-warehouse')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'out-warehouse'
-                  ? 'bg-rose-600 border-rose-600 text-white shadow-xs ring-1 ring-rose-500/20'
-                  : 'border-rose-200 text-rose-800 bg-rose-50/80 hover:bg-rose-100'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="Proses Out (Outbound Picking)"
             >
-              <ArrowUpFromLine className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'out-warehouse' ? 'bg-rose-600' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'Outbound' : 'Proses Out'}</span>
             </button>
 
             {/* Pilihan 3: Stock Opname */}
             <button
               onClick={() => onSelectMainModule('stock-opname')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'stock-opname'
-                  ? 'bg-amber-600 border-amber-600 text-white shadow-xs ring-1 ring-amber-500/20'
-                  : 'border-amber-300 text-amber-900 bg-amber-50/80 hover:bg-amber-100'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="Stock Opname (Audit Fisik)"
             >
-              <ClipboardCheck className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'stock-opname' ? 'bg-amber-600' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'Opname' : 'Stock Opname'}</span>
             </button>
 
             {/* Pilihan 4: Data Master */}
             <button
               onClick={() => onSelectMainModule('data-master')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'data-master'
-                  ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs ring-1 ring-indigo-500/20'
-                  : 'border-indigo-200 text-indigo-800 bg-indigo-50/80 hover:bg-indigo-100'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="Data Master (Rak, Produk, Karyawan)"
             >
-              <Database className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'data-master' ? 'bg-indigo-600' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'Master' : 'Data Master'}</span>
             </button>
 
             {/* Pilihan 5: Configuration System */}
             <button
               onClick={() => onSelectMainModule('configuration-system')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'configuration-system'
-                  ? 'bg-slate-900 border-slate-900 text-white shadow-xs ring-1 ring-slate-700/20'
-                  : 'border-slate-200 text-slate-800 bg-slate-100 hover:bg-slate-200'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="Configuration System (Pengaturan & Simulasi)"
             >
-              <Settings className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'configuration-system' ? 'bg-slate-800' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'Config' : 'Configuration'}</span>
             </button>
 
             {/* Pilihan 6: SOP & Alur Proses */}
             <button
               onClick={() => onSelectMainModule('sop-flowchart')}
-              className={`py-1.5 px-2 sm:px-3 rounded-xl text-[11px] sm:text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-1.5 border-2 ${
+              className={`py-1.5 px-3 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center justify-center gap-1.5 ${
                 activeMainModule === 'sop-flowchart'
-                  ? 'bg-blue-600 border-blue-600 text-white shadow-xs ring-1 ring-blue-500/20'
-                  : 'border-blue-200 text-blue-800 bg-blue-50/80 hover:bg-blue-100'
+                  ? 'bg-white text-slate-900 shadow-xs font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
               }`}
               title="SOP & Alur Proses Pergudangan"
             >
-              <Workflow className="w-3.5 h-3.5 shrink-0" />
+              <span className={`w-1.5 h-1.5 rounded-full ${activeMainModule === 'sop-flowchart' ? 'bg-blue-600' : 'bg-slate-400'}`} />
               <span className="truncate">{deviceViewMode === 'android' ? 'SOP' : 'SOP & Alur'}</span>
             </button>
           </div>
