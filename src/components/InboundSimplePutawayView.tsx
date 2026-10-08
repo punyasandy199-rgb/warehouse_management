@@ -727,7 +727,7 @@ export const InboundSimplePutawayView: React.FC<InboundSimplePutawayViewProps> =
               <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
                 {scannedCartons.map((item, idx) => (
                   <div
-                    key={`${item.rawCode}-${idx}`}
+                    key={`${item.cartonFormatted || item.cartonNumber}-${idx}-${item.rawCode}`}
                     className="p-2.5 sm:px-3 flex items-center justify-between gap-2 hover:bg-slate-50/80 text-xs transition-colors"
                   >
                     <div className="flex items-center gap-2.5 min-w-0 flex-1">

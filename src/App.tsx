@@ -270,7 +270,7 @@ export default function App() {
   const [scannerMode, setScannerMode] = useState<ScannerMode>('LOOKUP');
   const [scannerAllowedModes, setScannerAllowedModes] = useState<ScannerMode[] | undefined>(undefined);
   const [scannerPrefilledSlot, setScannerPrefilledSlot] = useState<string>('');
-  const [scannerPutawayOption, setScannerPutawayOption] = useState<'OPTION_1_RANGE' | 'OPTION_2_SCAN_ALL'>('OPTION_1_RANGE');
+  const [scannerPutawayOption, setScannerPutawayOption] = useState<'OPTION_1_RANGE' | 'OPTION_2_SCAN_ALL'>('OPTION_2_SCAN_ALL');
   
   const [selectedSlot, setSelectedSlot] = useState<RackSlot | null>(null);
   const [isLabelModalOpen, setIsLabelModalOpen] = useState(false);
