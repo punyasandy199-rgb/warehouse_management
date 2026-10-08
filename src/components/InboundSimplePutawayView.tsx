@@ -48,6 +48,8 @@ export interface ScannedCartonItem {
   productionTime?: string;
   rawCode: string;
   scannedAt: string;
+  isDifferentBatch?: boolean;
+  expectedBatch?: string;
 }
 
 interface InboundSimplePutawayViewProps {
@@ -718,65 +720,109 @@ export const InboundSimplePutawayView: React.FC<InboundSimplePutawayViewProps> =
                 <div className="flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 text-blue-600 shrink-0" />
                   <span>
-                    <strong>Review Box:</strong> Nomor karton, batch, dan <strong>Jam Produksi</strong> tercatat otomatis. Jika ada box yang keliru, klik <strong>Hapus</strong> lalu scan box pengganti.
+                    <strong>Nomor Box dari QR Code:</strong> Nomor karton dibaca langsung dari QR fisik (bisa acak/tidak urut). Jika ada box keliru, klik <strong>Hapus</strong> lalu scan box pengganti.
                   </span>
                 </div>
               </div>
 
-              {/* Tabel / List Box yang Ter-scan */}
-              <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
-                {scannedCartons.map((item, idx) => (
-                  <div
-                    key={`${item.cartonFormatted || item.cartonNumber}-${idx}-${item.rawCode}`}
-                    className="p-2.5 sm:px-3 flex items-center justify-between gap-2 hover:bg-slate-50/80 text-xs transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span className="w-5 h-5 rounded bg-slate-900 text-white text-xs font-mono font-bold flex items-center justify-center shrink-0">
-                        {idx + 1}
-                      </span>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-mono font-bold text-slate-900 text-sm">
-                            {item.cartonFormatted || `D${String(item.cartonNumber).padStart(3, '0')}`}
-                          </span>
-                          <span className="font-semibold text-slate-800 truncate">
-                            {item.productName}
-                          </span>
+              {/* WARNING JIKA DALAM 1 SESI SCAN TERDAPAT BATCH BERBEDA */}
+              {(() => {
+                const primaryBatch = scannedCartons.length > 0 ? scannedCartons[0].batchNo : '';
+                const diffBatches = Array.from(new Set(scannedCartons.map(c => c.batchNo).filter(b => b && b !== primaryBatch)));
+                if (diffBatches.length > 0) {
+                  return (
+                    <div className="p-3 bg-amber-50 border-2 border-amber-400 rounded-lg text-amber-950 flex items-start gap-2.5 text-xs shadow-xs animate-pulse">
+                      <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <div className="font-bold text-amber-950 text-sm">
+                          ⚠️ PERINGATAN: Terdeteksi Batch Berbeda dalam Pallet Ini!
                         </div>
-                        {/* INFORMASI LENGKAP: BATCH, TANGGAL & JAM PRODUKSI */}
-                        <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono mt-0.5 flex-wrap">
-                          <span>Batch {item.batchNo}</span>
-                          <span>&bull;</span>
-                          <span className="text-emerald-700 font-semibold flex items-center gap-1">
-                            <Clock className="w-3 h-3 text-emerald-600" />
-                            Jam: {item.productionTime || currentProdTime}
-                          </span>
-                          <span>&bull;</span>
-                          <span>Tgl: {item.productionDate || currentProdDate}</span>
-                          <span>&bull;</span>
-                          <span className="text-slate-400">Scan: {item.scannedAt}</span>
+                        <div className="text-xs text-amber-900 leading-relaxed">
+                          Sesi scan diawali dengan <strong>Batch {primaryBatch}</strong>, namun terdapat box dengan batch lain (<strong>{diffBatches.join(', ')}</strong>). Harap periksa fisik kardus dan pastikan apakah pencampuran batch diperbolehkan sesuai SOP.
                         </div>
                       </div>
                     </div>
+                  );
+                }
+                return null;
+              })()}
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[10px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
-                        ✓ Terinput
-                      </span>
-                      {onRemoveScannedCarton && (
-                        <button
-                          type="button"
-                          onClick={() => onRemoveScannedCarton(idx)}
-                          className="px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 hover:border-rose-300 rounded text-xs font-semibold cursor-pointer transition flex items-center gap-1 shadow-2xs"
-                          title="Hapus box ini untuk scan kembali box pengganti yang benar"
-                        >
-                          <Trash2 className="w-3.5 h-3.5 text-rose-500" />
-                          <span>Hapus</span>
-                        </button>
-                      )}
+              {/* Tabel / List Box yang Ter-scan */}
+              <div className="max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                {scannedCartons.map((item, idx) => {
+                  const primaryBatch = scannedCartons.length > 0 ? scannedCartons[0].batchNo : '';
+                  const isItemDiffBatch = item.isDifferentBatch || (primaryBatch && item.batchNo && item.batchNo !== primaryBatch);
+
+                  return (
+                    <div
+                      key={`${item.cartonFormatted || item.cartonNumber}-${idx}-${item.rawCode}`}
+                      className={`p-2.5 sm:px-3 flex items-center justify-between gap-2 text-xs transition-colors ${
+                        isItemDiffBatch ? 'bg-amber-50/70 hover:bg-amber-100/60 border-l-4 border-amber-500' : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="flex flex-col items-center shrink-0">
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-white text-[10px] font-mono font-bold leading-none">
+                            #{idx + 1}
+                          </span>
+                          <span className="text-[9px] text-slate-400 font-sans mt-0.5">Scan</span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-mono font-black text-slate-900 text-sm bg-slate-100 px-2 py-0.5 rounded border border-slate-300 shadow-2xs">
+                              Box {item.cartonFormatted || `D${String(item.cartonNumber).padStart(3, '0')}`}
+                            </span>
+                            <span className="font-semibold text-slate-800 truncate">
+                              {item.productName}
+                            </span>
+                            {isItemDiffBatch && (
+                              <span className="text-[10px] font-bold text-amber-950 bg-amber-100 border border-amber-400 px-2 py-0.5 rounded flex items-center gap-1">
+                                <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                Beda Batch ({item.batchNo})
+                              </span>
+                            )}
+                          </div>
+                          {/* INFORMASI LENGKAP: BATCH, TANGGAL & JAM PRODUKSI */}
+                          <div className="flex items-center gap-2 text-slate-500 text-[11px] font-mono mt-0.5 flex-wrap">
+                            <span className={isItemDiffBatch ? 'text-amber-800 font-bold' : ''}>
+                              Batch {item.batchNo}
+                            </span>
+                            <span>&bull;</span>
+                            <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-emerald-600" />
+                              Jam: {item.productionTime || currentProdTime}
+                            </span>
+                            <span>&bull;</span>
+                            <span>Tgl: {item.productionDate || currentProdDate}</span>
+                            <span>&bull;</span>
+                            <span className="text-slate-400">Scan: {item.scannedAt}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                          isItemDiffBatch
+                            ? 'text-amber-800 bg-amber-100 border-amber-300'
+                            : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+                        }`}>
+                          {isItemDiffBatch ? '⚠️ Beda Batch' : '✓ Terinput'}
+                        </span>
+                        {onRemoveScannedCarton && (
+                          <button
+                            type="button"
+                            onClick={() => onRemoveScannedCarton(idx)}
+                            className="px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 hover:border-rose-300 rounded text-xs font-semibold cursor-pointer transition flex items-center gap-1 shadow-2xs"
+                            title="Hapus box ini untuk scan kembali box pengganti yang benar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                            <span>Hapus</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ) : (

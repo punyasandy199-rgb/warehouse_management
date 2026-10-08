@@ -133,7 +133,7 @@ export function formatIsoDate(rawDateStr: string): string {
 export function parseFinishedGoodsQrCode(rawInput: string): ParsedFinishedGoodsQr {
   const clean = (rawInput || '').trim();
   
-  // Default fallback
+  // Default structure without hardcoded carton number
   const result: ParsedFinishedGoodsQr = {
     isValid: false,
     rawString: clean,
@@ -145,8 +145,8 @@ export function parseFinishedGoodsQrCode(rawInput: string): ParsedFinishedGoodsQ
     productName: 'SIC 25 BR (1 X 30 KG)',
     netWeightKg: 30,
     cartonPrefix: 'D',
-    cartonNumber: 86,
-    cartonNumberFormatted: 'D086',
+    cartonNumber: null as any,
+    cartonNumberFormatted: '',
     productionDateRaw: '30062026',
     productionDateFormatted: '30-06-2026',
     productionTimeRaw: '1435',
@@ -180,190 +180,125 @@ export function parseFinishedGoodsQrCode(rawInput: string): ParsedFinishedGoodsQ
     } catch {}
   }
 
-  // B. Check standard high-density concatenated QR code
-  // Example Double Date: "PA274/2612230062026D08614353006202630062028086"
-  // Example Single Date: "PA274/2612230062026D086143530062028086"
-  // Group 1: Packing Line (PA, PB)
-  // Group 2: Batch (274/26)
-  // Group 3: PIN (122)
-  // Group 4: Production Date (30062026 -> 30-06-2026)
-  // Group 5: Carton (D086 -> exactly letter + 3 digits, or 3 digits)
-  // Group 6: Production Time (1435 -> 14:35 WIB)
-  // Next: Best Before (30062028 -> 30-06-2028)
-  
-  // 1. Double date format (contains repeated production date before best before)
-  const doubleRegex = /^(PA|PB|[A-Z]{1,2})(\d{1,4}\/\d{2}|\d{3,5})(\d{2,4})(\d{8})([A-Z]?\d{3})(\d{4})(\d{8})(\d{8})(\d{2,4})?$/i;
-  const matchDouble = clean.match(doubleRegex);
-
-  if (matchDouble) {
-    const pLine = matchDouble[1].toUpperCase();
-    const bNo = matchDouble[2].includes('/') ? matchDouble[2] : `${matchDouble[2].slice(0, -2)}/${matchDouble[2].slice(-2)}`;
-    const pin = matchDouble[3];
-    const prodDate = matchDouble[4];
-    const rawCarton = matchDouble[5];
-    const prodTime = matchDouble[6];
-    const expiryDate = matchDouble[8];
-    const repeatCarton = matchDouble[9];
-
-    const cPrefix = rawCarton.charAt(0).match(/[A-Z]/i) ? rawCarton.charAt(0).toUpperCase() : 'D';
-    const cNum = parseInt(repeatCarton || '', 10) || parseInt(rawCarton.replace(/\D/g, ''), 10) || 86;
-
-    result.isValid = true;
-    result.packingLine = pLine.startsWith('PB') ? 'PB' : 'PA';
-    result.packingLineName = result.packingLine === 'PB' ? 'Packing 2 (PB)' : 'Packing 1 (PA)';
-    result.batchNo = bNo;
-    result.batchYear = '20' + (bNo.split('/')[1] || '26');
-    result.productPin = pin;
-    result.productName = KNOWN_PIN_PRODUCTS[pin]?.name || `SIC 25 BR (1 X 30 KG)`;
-    result.netWeightKg = KNOWN_PIN_PRODUCTS[pin]?.weightKg || 30;
-    result.cartonPrefix = cPrefix;
-    result.cartonNumber = cNum;
-    result.cartonNumberFormatted = `${cPrefix}${String(cNum).padStart(3, '0')}`;
-    result.productionDateRaw = prodDate;
-    result.productionDateFormatted = formatDdMmYyyy(prodDate);
-    result.productionTimeRaw = prodTime;
-    result.productionTimeFormatted = `${prodTime.slice(0, 2)}:${prodTime.slice(2, 4)} WIB`;
-    result.bestBeforeRaw = expiryDate;
-    result.bestBeforeFormatted = formatDdMmYyyy(expiryDate);
-    return result;
+  // B. Extract Packing Line (PA / PB)
+  if (/^PB/i.test(clean) || /\bPB\b/i.test(clean)) {
+    result.packingLine = 'PB';
+    result.packingLineName = 'Packing 2 (PB)';
+  } else {
+    result.packingLine = 'PA';
+    result.packingLineName = 'Packing 1 (PA)';
   }
 
-  // 2. Single date format (production date + best before date, no repeated date)
-  // e.g. "PA274/2612230062026D086143530062028086"
-  const singleRegex = /^(PA|PB|[A-Z]{1,2})(\d{1,4}\/\d{2}|\d{3,5})(\d{2,4})(\d{8})([A-Z]?\d{3})(\d{4})(\d{8})(\d{2,4})?$/i;
-  const matchSingle = clean.match(singleRegex);
-
-  if (matchSingle) {
-    const pLine = matchSingle[1].toUpperCase();
-    const bNo = matchSingle[2].includes('/') ? matchSingle[2] : `${matchSingle[2].slice(0, -2)}/${matchSingle[2].slice(-2)}`;
-    const pin = matchSingle[3];
-    const prodDate = matchSingle[4];
-    const rawCarton = matchSingle[5];
-    const prodTime = matchSingle[6];
-    const expiryDate = matchSingle[7];
-    const repeatCarton = matchSingle[8];
-
-    const cPrefix = rawCarton.charAt(0).match(/[A-Z]/i) ? rawCarton.charAt(0).toUpperCase() : 'D';
-    const cNum = parseInt(repeatCarton || '', 10) || parseInt(rawCarton.replace(/\D/g, ''), 10) || 86;
-
-    result.isValid = true;
-    result.packingLine = pLine.startsWith('PB') ? 'PB' : 'PA';
-    result.packingLineName = result.packingLine === 'PB' ? 'Packing 2 (PB)' : 'Packing 1 (PA)';
-    result.batchNo = bNo;
-    result.batchYear = '20' + (bNo.split('/')[1] || '26');
-    result.productPin = pin;
-    result.productName = KNOWN_PIN_PRODUCTS[pin]?.name || `SIC 25 BR (1 X 30 KG)`;
-    result.netWeightKg = KNOWN_PIN_PRODUCTS[pin]?.weightKg || 30;
-    result.cartonPrefix = cPrefix;
-    result.cartonNumber = cNum;
-    result.cartonNumberFormatted = `${cPrefix}${String(cNum).padStart(3, '0')}`;
-    result.productionDateRaw = prodDate;
-    result.productionDateFormatted = formatDdMmYyyy(prodDate);
-    result.productionTimeRaw = prodTime;
-    result.productionTimeFormatted = `${prodTime.slice(0, 2)}:${prodTime.slice(2, 4)} WIB`;
-    result.bestBeforeRaw = expiryDate;
-    result.bestBeforeFormatted = formatDdMmYyyy(expiryDate);
-    return result;
+  // C. Extract Batch Number (e.g. 274/26, 275/26, 01/26)
+  const batchMatch = clean.match(/(?:BATCH|LOT|LOTNO)?[:\s-]?(\d{1,4}\/\d{2})/i) ||
+                     clean.match(/(?:PA|PB)(\d{2,4}\/\d{2})/i) ||
+                     clean.match(/(\d{1,4}[-/]\d{2})/i);
+  if (batchMatch) {
+    result.batchNo = batchMatch[1].replace('-', '/');
+    result.batchYear = '20' + (result.batchNo.split('/')[1] || '26');
   }
 
-  // 3. Resilient Structured Field Matcher (handles any slight variations in prefix/batch)
-  const structuredMatch = clean.match(/^(?:PA|PB|[A-Z]{1,2})?.*?(?:(\d{1,4}\/\d{2}))?.*?(\d{8})([A-Z])(\d{3})(\d{4})(\d{8})/i);
-  if (structuredMatch) {
-    const bNo = structuredMatch[1] || '274/26';
-    const prodDate = structuredMatch[2];
-    const cPrefix = structuredMatch[3].toUpperCase();
-    const cNum = parseInt(structuredMatch[4], 10);
-    const prodTime = structuredMatch[5];
-    const expiryDate = structuredMatch[6];
-
-    result.isValid = true;
-    result.batchNo = bNo;
-    result.batchYear = '20' + (bNo.split('/')[1] || '26');
-    result.cartonPrefix = cPrefix;
-    result.cartonNumber = cNum;
-    result.cartonNumberFormatted = `${cPrefix}${String(cNum).padStart(3, '0')}`;
-    result.productionDateRaw = prodDate;
-    result.productionDateFormatted = formatDdMmYyyy(prodDate);
-    result.productionTimeRaw = prodTime;
-    result.productionTimeFormatted = `${prodTime.slice(0, 2)}:${prodTime.slice(2, 4)} WIB`;
-    result.bestBeforeRaw = expiryDate;
-    result.bestBeforeFormatted = formatDdMmYyyy(expiryDate);
-    return result;
+  // D. Extract Product PIN & Name
+  const pinMatch = clean.match(/(?:PA|PB)?\d{1,4}\/\d{2}(\d{2,3})/i) || clean.match(/\b(122|18|09|01|11|10|123|124)\b/);
+  if (pinMatch && KNOWN_PIN_PRODUCTS[pinMatch[1]]) {
+    const prod = KNOWN_PIN_PRODUCTS[pinMatch[1]];
+    result.productPin = pinMatch[1];
+    result.productName = prod.name;
+    result.netWeightKg = prod.weightKg;
   }
 
-  // C. Delimited string with semicolon, pipe, slash, or commas
-  // e.g. "PA274/26/122/D086/30062026" or "PA;274/26;122;D086"
-  const parts = clean.split(/[;/|,]/).map(s => s.trim()).filter(Boolean);
-  if (parts.length >= 3) {
-    result.isValid = true;
-    parts.forEach(part => {
-      if (/^(PA|PB)$/i.test(part)) {
-        result.packingLine = part.toUpperCase() as any;
-        result.packingLineName = result.packingLine === 'PB' ? 'Packing 2 (PB)' : 'Packing 1 (PA)';
-      } else if (/^\d{1,4}\/\d{2}$/.test(part)) {
-        result.batchNo = part;
-      } else if (KNOWN_PIN_PRODUCTS[part]) {
-        result.productPin = part;
-        result.productName = KNOWN_PIN_PRODUCTS[part].name;
-      } else if (/^[A-Z]?\d{1,4}$/i.test(part) && parseInt(part.replace(/\D/g, ''), 10) < 500) {
-        const cNum = parseInt(part.replace(/\D/g, ''), 10);
-        result.cartonNumber = cNum;
-        result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
-      } else if (/^\d{8}$/.test(part)) {
-        result.productionDateRaw = part;
-        result.productionDateFormatted = formatDdMmYyyy(part);
-      }
-    });
-    return result;
-  }
-
-  // D. Short format from label: e.g. "A274/26/086" or "PA274/26/086" or "PB274/26/086"
-  const shortRegex = /^(PA|PB|A|B)?(\d+\/\d+)\/([A-Z]?\d+)$/i;
-  const matchShort = clean.match(shortRegex);
-  if (matchShort) {
-    const pLineRaw = (matchShort[1] || 'PA').toUpperCase();
-    const pLine = pLineRaw.includes('B') ? 'PB' : 'PA';
-    const bNo = matchShort[2];
-    const cNum = parseInt(matchShort[3].replace(/\D/g, ''), 10) || 86;
-
-    result.isValid = true;
-    result.packingLine = pLine;
-    result.packingLineName = pLine === 'PB' ? 'Packing 2 (PB)' : 'Packing 1 (PA)';
-    result.batchNo = bNo;
-    result.cartonNumber = cNum;
-    result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
-    return result;
-  }
-
-  // E. Standalone Carton Code: e.g. "D087", "D87", "D2", "BOX-2", "BOX 2", "KARTON 2", "087", "87"
-  const cartonCodeMatch = clean.match(/^(?:BOX|KARTON|CARTON|NO\.?|D)?[- ]?(\d{1,4})$/i);
-  if (cartonCodeMatch) {
-    const cNum = parseInt(cartonCodeMatch[1], 10);
-    result.isValid = true;
-    result.cartonNumber = cNum;
-    result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
-    return result;
-  }
-
-  // F. Fallback: If string contains keywords like PA274 or 274/26 or 122 or any digit
-  if (clean.includes('274/26') || clean.includes('122') || clean.includes('275/26')) {
-    result.isValid = true;
-    const numMatch = clean.match(/D?(\d{2,3})/);
-    if (numMatch) {
-      const cNum = parseInt(numMatch[1], 10);
-      result.cartonNumber = cNum;
-      result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
+  // E. Extract Production Date (8 digits DDMMYYYY) and Best Before
+  const dateMatches = clean.match(/\b\d{8}\b/g) || clean.match(/\d{8}/g);
+  if (dateMatches && dateMatches.length > 0) {
+    result.productionDateRaw = dateMatches[0];
+    result.productionDateFormatted = formatDdMmYyyy(dateMatches[0]);
+    if (dateMatches.length > 1) {
+      result.bestBeforeRaw = dateMatches[dateMatches.length - 1];
+      result.bestBeforeFormatted = formatDdMmYyyy(result.bestBeforeRaw);
     }
-    return result;
   }
 
-  // G. General Fallback: Any string scanned that has a number
-  const anyNumMatch = clean.match(/\d+/);
-  if (anyNumMatch) {
-    const cNum = parseInt(anyNumMatch[0], 10) % 1000;
-    if (cNum > 0) {
-      result.cartonNumber = cNum;
-      result.cartonNumberFormatted = `D${String(cNum).padStart(3, '0')}`;
+  // F. Extract Production Time (4 digits HHMM right after carton or keyword)
+  const timeRegexMatch = clean.match(/([DABCDEFGHJKMNPQRSTUVWYZ]\d{2,4})(\d{4})/i);
+  if (timeRegexMatch) {
+    const rawTime = timeRegexMatch[2];
+    result.productionTimeRaw = rawTime;
+    result.productionTimeFormatted = `${rawTime.slice(0, 2)}:${rawTime.slice(2, 4)} WIB`;
+  }
+
+  // G. Extract Carton Number & Carton Prefix (Physical Box Number from QR Code)
+  let cNum: number | null = null;
+  let cPrefix = 'D';
+
+  // 1. Standard concatenated Finished Goods: 8 digits date + [A-Z] + 3 digits carton + 4 digits time (HHMM)
+  const m1 = clean.match(/\d{8}[-/_ ]*([DABCDEFGHJKMNPQRSTUVWYZ])(\d{3})(?=\d{4}|[-/_ ]|$)/i);
+  if (m1) {
+    cPrefix = m1[1].toUpperCase();
+    cNum = parseInt(m1[2], 10);
+  }
+
+  // 2. Delimited or spaced 1-4 digit carton following date
+  if (cNum === null) {
+    const m2 = clean.match(/\d{8}[-/_ ]+([DABCDEFGHJKMNPQRSTUVWYZ])(\d{1,4})(?=\b|[-/_ ]|$)/i);
+    if (m2) {
+      cPrefix = m2[1].toUpperCase();
+      cNum = parseInt(m2[2], 10);
+    }
+  }
+
+  // 3. Repeat carton at the very end of concatenated string (e.g. ...30062028087)
+  if (cNum === null) {
+    const m3 = clean.match(/\d{8}([DABCDEFGHJKMNPQRSTUVWYZ])?(\d{1,4})$/i);
+    if (m3) {
+      if (m3[1]) cPrefix = m3[1].toUpperCase();
+      cNum = parseInt(m3[2], 10);
+    }
+  }
+
+  // 4. Explicit keyword BOX / KARTON / CARTON / NO (e.g. "BOX 89", "KARTON 087", "BOX-87")
+  if (cNum === null) {
+    const m4 = clean.match(/(?:BOX|KARTON|CARTON|NO\.?)\s*[-:]?\s*([A-Z])?(\d{1,4})/i);
+    if (m4) {
+      if (m4[1]) cPrefix = m4[1].toUpperCase();
+      cNum = parseInt(m4[2], 10);
+    }
+  }
+
+  // 5. Standalone or delimited carton code with prefix (e.g. "D087", "-D089-", "/D015/")
+  if (cNum === null) {
+    const m5 = clean.match(/(?:^|[^0-9A-Za-z])([DABCDEFGHJKMNPQRSTUVWYZ])(\d{1,4})(?:[^0-9A-Za-z]|$)/i);
+    if (m5) {
+      cPrefix = m5[1].toUpperCase();
+      cNum = parseInt(m5[2], 10);
+    }
+  }
+
+  // 6. Delimited with batch (e.g. "274/26-089", "274/26/D087", "274/26 D087")
+  if (cNum === null) {
+    const m6 = clean.match(/\d{1,4}\/\d{2}[-/\s:]([A-Z])?(\d{1,4})/i);
+    if (m6) {
+      if (m6[1]) cPrefix = m6[1].toUpperCase();
+      cNum = parseInt(m6[2], 10);
+    }
+  }
+
+  // 7. Pure standalone digits (e.g. "087", "87")
+  if (cNum === null) {
+    const m7 = clean.match(/^(\d{1,4})$/);
+    if (m7) {
+      cNum = parseInt(m7[1], 10);
+    }
+  }
+
+  if (cNum !== null && !isNaN(cNum)) {
+    result.isValid = true;
+    result.cartonNumber = cNum;
+    result.cartonPrefix = cPrefix;
+    result.cartonNumberFormatted = `${cPrefix}${String(cNum).padStart(3, '0')}`;
+  } else {
+    // If carton number not directly found, validate if string is a valid FG label
+    if (clean.length >= 10 && (clean.includes('PA') || clean.includes('PB') || clean.includes('274/26') || clean.includes('122'))) {
+      result.isValid = true;
     }
   }
 
